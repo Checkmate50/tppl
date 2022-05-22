@@ -12,7 +12,7 @@ x = uniform // x holds for all subsequent operations
 y <- uniform <!> gt(x, .5) // y holds the value until updated, which is uniform until x > .5
 --- // advance time
 dist(y) // note that this and the following statement are _interchangeable_
-y <-| mult(uniform, 2) <!> leq(x, .5) // y updates to hold for all subsequent operations, which is mult(uniform, 2) until x <= .5
+y <- y | (uniform * 2 <!> leq(x, .5)) // y updates to hold for all subsequent operations, which is mult(uniform, 2) until x <= .5
 --- // advance time
 dist(y)
 ```
@@ -54,7 +54,6 @@ c := c1\nc2         // no semicolons!  Whitespace aware!
     | x = e         // global assignment
     | x <X e        // next assignment
     | x <- e        // updateable assignment in the future (variant of NEXT that holds until updated)
-    | x <-| e       // update based on previous value OR new value
     | x <.. e       // x must eventually be e (though may not be immediately if a contradiction!)
     | f(e1, ...)    // prepositional invocation
     | dist(x)       // distribution of variable (must be a command!)
@@ -67,7 +66,7 @@ e := n
     | false
     | x
     | f(e1, ...)        // prepositional invocation
-    | add(e1, e2)       // adds things together (along with other operations)           
+    | e1 + e2           // adds things together (along with other operations)           
     | e1 | e2           // e1 or e2
     | e1 & e2           // e1 and e2
     | e1 <!> e2         // e1 weak until e2 (implies negation)
@@ -164,10 +163,10 @@ The above code produces a runtime error, since `x` will never be true (indeed, t
 The only core supported probabilistic expressions are those of `uniform` and `normal`, though more are intended to be added.  These both create distributions, which can only be evaluated with `dist`.  Note that `print` will fail on distributions, as will be covered further in the section on Types.  Distributions are notable in that they invoke interval analysis on any timestep they exist in, and are only compatible with other distributions.  Probabilistic expressions can be operated on by constants (of course):
 
 ```
-x <- add(uniform, 1) // equivalent, of course, to uniform(1, 2)
+x <- uniform + 1 // equivalent, of course, to uniform(1, 2)
 ---
 dist(x)
-x <- sub(x, 1) // returns x to the uniform dist
+x <- x - 1 // returns x to the uniform dist
 ---
 dist(x)
 ```
@@ -176,7 +175,7 @@ Note that this behavior can quickly get out of hand for the compiler to evaluate
 
 ```
 foo(x) = leq(x, .1) & uniform
-foo(x) = gt(x, .1) & add(foo(div(x, 2)), 1)
+foo(x) = gt(x, .1) & foo(x / 2) + 1
 x <- foo(uniform)
 ---
 dist(x)
@@ -200,10 +199,10 @@ Is this a distribution?  Probably!  Makes the `<..` operator feel much more usef
 An interesting aside is the potential existence of temporal predicates (which are currently unspecified):
 
 ```
-foo(x) <- add(x, 1)
+foo(x) <- x + 1
 ---
 y <- foo(3)
-foo(x) <- sub(x, 1)
+foo(x) <- x - 1
 ---
 print(y)
 ```
