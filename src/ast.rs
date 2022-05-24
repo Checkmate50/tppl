@@ -1,7 +1,7 @@
 #[derive(Clone)]
 pub enum Const {
     Bool(bool),
-    Number(i32),
+    Number(i64),
 }
 
 pub type Var = String;
