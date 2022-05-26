@@ -38,7 +38,7 @@ pub fn string_of_expr(e : ast::Expr) -> String {
         Expr::EConst(c) => string_of_const(c),
         Expr::EUnop(u, e) => string_of_unop(u) + &string_of_expr(*e),
         Expr::EVar(s) => s,
-        Expr::Input => "input()".to_owned()
+        Expr::Input => "input".to_owned()
     }
 }
 

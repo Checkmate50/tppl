@@ -1,0 +1,15 @@
+x <- 1 + 2 - 3
+---
+print x
+x <- 1 * 2 / 2
+---
+print x
+x <- 1 + 2 * 3
+---
+print x
+y <- true | false
+---
+print y
+y <- true & false | true
+---
+print y

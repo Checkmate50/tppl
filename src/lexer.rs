@@ -15,6 +15,8 @@ pub enum Token {
     FUTURE,
     TRUE,
     FALSE,
+    INPUT,
+    PRINT,
     Op(String),
     Number(String),
     Var(String)
@@ -31,6 +33,8 @@ impl fmt::Display for Token {
             Token::FUTURE => write!(f, "<.."),
             Token::TRUE => write!(f, "true"),
             Token::FALSE => write!(f, "false"),
+            Token::INPUT => write!(f, "input"),
+            Token::PRINT => write!(f, "print"),
             Token::Op(s) => write!(f, "Op {}", s),
             Token::Number(n) => write!(f, "Num {}", n),
             Token::Var(s) => write!(f, "Var {}", s) 
@@ -66,6 +70,8 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
             text::ident().map(|ident: String| match ident.as_str() {
         "true"  =>  Token::TRUE,
         "false" =>  Token::FALSE,
+        "input" =>  Token::INPUT,
+        "print" =>  Token::PRINT,
         _       =>  Token::Var(ident),
     });
 
