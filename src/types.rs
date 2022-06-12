@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Clone)]
 #[derive(PartialEq)]
 #[derive(Debug)]
@@ -35,13 +33,20 @@ pub enum Type {
 impl Type {
     pub fn get_simpl(&mut self) -> SimpleType {
         match self {
-            Type::Prod(_, s) => (*s).clone(),
+            Type::Prod(_, s) => s.clone(),
             Type::TempNest(_, ty) => ty.get_simpl(),
             Type::Union(_, _) => panic!("Rn, I don't feel like figuring out whether I want a set of simpletypes, an error, or whatever.")
         }
     }
 
-    // pub fn get_temporal(&mut self) -> TemporalType {}
+    // getting the first layer is good enough rn. perhaps I'll later return nested temporal types
+    pub fn get_temporal(&mut self) -> TemporalType {
+        match self {
+            Type::Prod(t, _) => t.clone(),
+            Type::TempNest(temp, _) => temp.clone(),
+            Type::Union(_, _) => panic!("Rn, I don't feel like figuring out whether I want a set of temporaltypes, an error, or whatever.")
+        }
+    }
 }
 
 pub fn advance_type(t : Box<Type>) -> Option<Box<Type>> {
@@ -50,13 +55,15 @@ pub fn advance_type(t : Box<Type>) -> Option<Box<Type>> {
             match temp {
                 TemporalType::Next => {println!("reached a {:?}", t); Some(Box::new(Type::Prod(TemporalType::Current, simpl.clone())))},
                 TemporalType::Current => None,
-                TemporalType::Until | TemporalType::Global | TemporalType::Future | TemporalType::Undefined => Some(t)
+                TemporalType::Future => Type::Prod(TemporalType::Until, simp.clone()),
+                TemporalType::Until | TemporalType::Global | TemporalType::Undefined => Some(t)
             }
         ,
         Type::TempNest(ref temp, ref ty) => {
             match temp {
                 TemporalType::Next => Some(Box::new((**ty).clone())),
                 TemporalType::Current => advance_type(Box::new((**ty).clone())),
+                TemporalType::Future => Type::TempNest(TemporalType::Until, Box::new(ty.clone())),
                 TemporalType::Global | TemporalType::Until | TemporalType::Future | TemporalType::Undefined => Some(t)
             }
         },
@@ -79,37 +86,31 @@ pub fn advance_type(t : Box<Type>) -> Option<Box<Type>> {
     }
 }
 
-#[derive(Debug)]
-pub struct TypeContext {
-    // only global scope
-    pub vars: HashMap<String, Type>,
-    pub clock: i32
-}
+pub fn get_most_immediate_type(ty: &Type) -> &Type {
+    match ty {
+        Type::Prod(_, _) => ty,
+        &Type::TempNest(_, _) => ty,
+        Type::Union(ty1, ty2) => {
+            let immediate_ty1 = get_most_immediate_type(ty1);
+            let immediate_ty2 = get_most_immediate_type(ty2);
 
-impl TypeContext {
-    // gives type of variable name.
-    pub fn look_up(&mut self, var_name: &String) -> Option<&Type> {
-        self.vars.get(var_name)
-    }
-    // adds new variable
-    pub fn add_name(&mut self, var_name: &String, data: Type) -> () {
-        if let Some(typs) = self.vars.get(var_name) {
-            self.vars.insert(var_name.to_string(), Type::Union(Box::new(data), Box::new(typs.clone())));
-        } else {
-            self.vars.insert(var_name.to_string(), data);
+            match (immediate_ty1, immediate_ty2) {
+                (Type::Prod(TemporalType::Current, _), Type::Prod(_, _)) => immediate_ty1,
+                (Type::Prod(_, _), Type::Prod(TemporalType::Current, _)) => immediate_ty2,
+                (Type::Prod(TemporalType::Global, _), Type::Prod(_, _)) => immediate_ty1,
+                (Type::Prod(_, _), Type::Prod(TemporalType::Global, _)) => immediate_ty2,
+                (Type::Prod(TemporalType::Next, _), Type::Prod(_, _)) => immediate_ty2,
+                (Type::Prod(_, _), Type::Prod(TemporalType::Next, _)) => immediate_ty1,
+                _ => panic!("There is no way to decide which is more pressing between {:?} and {:?}.", immediate_ty1, immediate_ty2)
+            }
         }
     }
+}
 
-    pub fn step_time(&mut self) -> () {
-        self.clock += 1;
-
-        // hashmaps aren't ordered in Rust...
-        /*
-        self.vars = self.vars.keys().map(|s| (*s).clone()).zip(
-        //     self.vars.values().filter_map(|t| advance_type(Box::new((*t).clone()))).map(|t| *t)
-        ).collect();
-        */
-
-        self.vars = self.vars.clone().into_iter().map(|(name, ty)| (name, advance_type(Box::new(ty.clone())))).filter(|(_, ty)| ty.is_some()).map(|(name, ty)| (name, *ty.unwrap())).collect();
+pub fn is_currently_available(ty : &TemporalType) -> bool {
+    match ty {
+        TemporalType::Global | TemporalType::Current | TemporalType::Future | TemporalType::Until => true,
+        TemporalType::Next => false,
+        TemporalType::Undefined => false
     }
 }

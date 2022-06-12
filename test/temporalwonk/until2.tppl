@@ -1,0 +1,28 @@
+a <.. false
+b <.. 0
+b <- 1 <!> a
+---
+c = b + 1
+a = true
+print c // 1
+
+
+
+
+// test files should use comments next to print statements to test output.
+// ex. `print 3 // 3` is fine. ex. `a = 3\nprint a // 4` will error.
+
+
+
+// `until_dependency_definitions` should be prioritized in arrange_time_block
+a <.. false
+b <.. true
+b <- false <!> a
+---
+c = b & a
+a = true <!> b 
+
+// a : true <!> b; true <!> false; true
+// b : false <!> a; false <!> true; true {b <.. true}
+// a : true <!> b; true <!> true; false {a <.. false}
+// c : true & false; false
