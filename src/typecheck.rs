@@ -1,9 +1,18 @@
-// use std::fmt;
-use std::collections::HashMap;
-use std::collections::HashSet;
+/* todo: block `input` as until_condition. for example:
+```
+    a <- b <!> input()
+```
+*/
+
+
+
+use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::ast;
 use crate::types;
+use crate::errors;
 use ast::Var;
 
 use petgraph::graph::Graph;
@@ -13,319 +22,145 @@ use petgraph::stable_graph::NodeIndex;
 // use petgraph::algo::is_cyclic_directed;
 
 
-// pub(crate) type InferResult<T> = Result<T, ()>;
-
-
-// #[derive(Debug, Clone)]
-// pub struct ConstrainError;
-// impl fmt::Display for ConstrainError {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "couldn't constrain types")
-//     }
-// }
-
-#[derive(Debug)]
-pub struct InferError {
-    message: String,
-}
-#[derive(Debug)]
-pub struct ConstrainError {
-    message: String,
-}
-#[derive(Debug)]
-pub struct CurrentlyUnavailableError {
-    message : String,
-}
-#[derive(Debug)]
-pub struct DupeAssignError {
-    message: String,
-}
-#[derive(Debug)]
-pub struct RecursiveAssignError {
-    message: String,
-}
-#[derive(Debug)]
-pub struct CircularAssignError {
-    message: String,
-}
-#[derive(Debug)]
-pub enum TypeError {
-    Infer(InferError),
-    Constrain(ConstrainError),
-    Immediacy(CurrentlyUnavailableError)
-}
-#[derive(Debug)]
-pub enum AssignError {
-    Dupe(DupeAssignError),
-    Recursive(RecursiveAssignError),
-    Circular(CircularAssignError)
-}
-#[derive(Debug)]
-pub struct NameError {
-    message: String,
-}
-#[derive(Debug)]
-pub enum CompileTimeError {
-    Type(TypeError),
-    Assign(AssignError),
-    Access(NameError)
-}
-impl From<InferError> for TypeError {
-    fn from(e: InferError) -> Self {
-        TypeError::Infer(e)
-    }
-}
-impl From<ConstrainError> for TypeError {
-    fn from(e: ConstrainError) -> Self {
-        TypeError::Constrain(e)
-    }
-}
-impl From<CurrentlyUnavailableError> for TypeError {
-    fn from(e: CurrentlyUnavailableError) -> Self {
-        TypeError::Immediacy(e)
-    }
-}
-impl From<DupeAssignError> for AssignError {
-    fn from(e: DupeAssignError) -> Self {
-        AssignError::Dupe(e)
-    }
-}
-impl From<RecursiveAssignError> for AssignError {
-    fn from(e: RecursiveAssignError) -> Self {
-        AssignError::Recursive(e)
-    }
-}
-impl From<CircularAssignError> for AssignError {
-    fn from(e: CircularAssignError) -> Self {
-        AssignError::Circular(e)
-    }
-}
-impl From<TypeError> for CompileTimeError {
-    fn from(e: TypeError) -> Self {
-        CompileTimeError::Type(e)
-    }
-}
-impl From<AssignError> for CompileTimeError {
-    fn from(e: AssignError) -> Self {
-        CompileTimeError::Assign(e)
-    }
-}
-impl From<NameError> for CompileTimeError {
-    fn from(e: NameError) -> Self {
-        CompileTimeError::Access(e)
-    }
-}
-
-
-impl From<CircularAssignError> for CompileTimeError {
-    fn from(e: CircularAssignError) -> Self {
-        CompileTimeError::Assign(AssignError::Circular(e))
-    }
-}
-impl From<ConstrainError> for CompileTimeError {
-    fn from(e: ConstrainError) -> Self {
-        CompileTimeError::Type(TypeError::Constrain(e))
-    }
-}
-impl From<CurrentlyUnavailableError> for CompileTimeError {
-    fn from(e: CurrentlyUnavailableError) -> Self {
-        CompileTimeError::Type(TypeError::Immediacy(e))
-    }
-}
-
 #[derive(Debug)]
 pub struct TypeContext {
     // only global scope
-    pub vars: HashMap<Var, types::Type>,
+    pub vars: HashMap<Var, Vec<types::Type>>,
     pub clock: i32
 }
 
 impl TypeContext {
     // gives type of variable name.
-    pub fn look_up(&mut self, var_name: &Var) -> Result<types::Type, NameError> {
-        if let Some(val) = self.vars.get(var_name) {
-            Ok(types::get_most_immediate_type(val).clone())
+    pub fn look_up(&mut self, var_name: &Var) -> Result<types::Type, errors::CompileTimeError> {
+        if let Some(ty) = self.vars.get(var_name) {
+            if let Some(t) = types::get_most_immediate_type(ty.to_vec()) {
+                Ok(t)
+            } else {
+                Err(errors::CurrentlyUnavailableError{
+                    message : format!(
+                        "Name only has {:?}, which isn't immediately available.", ty).to_string()})?
+            }
         } else {
-            Err(NameError{message : format!("There is no variable with name {}", var_name).to_string()})   
+            println!("ctx : {:?}", self.vars);
+            Err(errors::NameError{message : format!("There is no variable with name {}", var_name).to_string()})?
         }
     }
 
     // adds new variable
-    pub fn add_name(&mut self, var_name: &Var, data: types::Type) -> Result<(), TypeError> {
-        if let Some(typs) = self.vars.get(var_name) {
-            let t = resolve_temporal_conflicts(&typs, &data)?;
-            self.vars.insert(var_name.to_string(), types::Type::Union(Box::new(data), Box::new(typs.clone())));
+    pub fn add_name(&mut self, var_name: &Var, data: types::Type) -> Result<(), errors::CompileTimeError> {
+        if let Some(typs) = self.vars.clone().get(var_name) {
+            // static-checking can't decide when/if `until`'s condition releases, thus we might as well forgive it for now. violations will be caught at run-time.
+            self.vars.insert(var_name.to_string(), types::resolve_temporal_conflicts(typs.clone(), data, true)?);
         } else {
-            self.vars.insert(var_name.to_string(), data);
+            self.vars.insert(var_name.to_string(), [data].to_vec());
         }
+        Ok(())
     }
 
     pub fn step_time(&mut self) -> () {
         self.clock += 1;
-        self.vars = self.vars.clone().into_iter().map(|(name, ty)| (name, types::advance_type(Box::new(ty.clone())))).filter(|(_, ty)| ty.is_some()).map(|(name, ty)| (name, *ty.unwrap())).collect();
+        self.vars = self.vars.clone().into_iter().map(|(name, typs)| (name, typs.into_iter().filter_map(types::advance_type).collect())).filter(|(_, typs) : &(String, Vec<types::Type>)| !typs.is_empty()).collect();
     }
 }
 
-pub fn resolve_temporal_conflicts(og_ty : &Type, new_ty : &Type) -> Result<Type, ConstrainError> {
-    use types::TemporalType;
-    use types::Type;
-    match (og_ty, new_ty.clone()) {
-        (Prod(temp1, simpl1), Prod(temp2, simpl2)) => {
-            match (temp1, temp2) {
-                (TemporalType::Global, TemporalType::Global) => Err(ConstrainError {message : "Global and Global conflict".to_string()}),
-                (TemporalType::Global, TemporalType::Next) => Err(ConstrainError {message : "Global and Next conflict".to_string()}),
-                (TemporalType::Next, TemporalType::Global) => Err(ConstrainError {message : "Next and Global conflict".to_string()}),
-                (TemporalType::Next, TemporalType::Next) => Err(ConstrainError {message : "Next and Next conflict".to_string()}),
-                (TemporalType::Current, TemporalType::Global) => Err(ConstrainError {message : "Current and Global conflict".to_string()}),
-                (TemporalType::Current, TemporalType::Current) => Err(ConstrainError {message : "Current and Current conflict".to_string()}),
-                (TemporalType::Global, TemporalType::Current) => Err(ConstrainError {message : "Global and Current conflict".to_string()}),
-
-                (TemporalType::Next, TemporalType::Current) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-                (TemporalType::Current, TemporalType::Next) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-                (TemporalType::Until, TemporalType::Next) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-
-                (TemporalType::Until, TemporalType::Global) => Ok(new_ty.clone()),
-                (TemporalType::Until, TemporalType::Current) => Ok(new_ty.clone()),
-
-                // these cases shouldn't happen, but just in case `Next(Until)` isn't the only way `Until` occurs.
-                (TemporalType::Global, TemporalType::Until) => Err(ConstrainError {message : "Global and Until conflict".to_string()}),
-                (TemporalType::Next, TemporalType::Until) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-                (TemporalType::Until, TemporalType::Until) => Ok(new_ty.clone())
-                (TemporalType::Current, TemporalType::Until) => Err(ConstrainError {message : "Current and Until conflict".to_string()}),
-            }
-        },
-        (Prod(temp1, simpl1), TempNest(temp2outie, (temp2innie, _simpl))) => {
-            match (temp1, (temp2outie, temp2innie)) {
-                (TemporalType::Global, (TemporalType::Next, TemporalType::Until)) => Err(ConstrainError {message : "Global and Next(Until) conflict".to_string()}),
-                (TemporalType::Global, (TemporalType::Global, TemporalType::Future)) => Err(ConstrainError {message : "Global and Global(Future) conflict".to_string()}),
-                (TemporalType::Next, (TemporalType::Next, TemporalType::Until)) => Err(ConstrainError {message : "Next and Next(Until) conflict".to_string()}),
-                
-                (TemporalType::Next, (TemporalType::Global, TemporalType::Future)) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-                (TemporalType::Until, (TemporalType::Next, TemporalType::Until)) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-                (TemporalType::Until, (TemporalType::Global, TemporalType::Future)) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-                (TemporalType::Current, (TemporalType::Next, TemporalType::Until)) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone()))),
-                (TemporalType::Current, (TemporalType::Global, TemporalType::Future)) => Ok(Type::Union(Box::new(new_ty.clone()), Box::new(og_ty.clone())))
-            }
-        },
-        (TempNest(temp1outie, (temp1innie, _simpl)), Prod(temp2, simpl2)) => {
-            // Global, Next, Until, Current, Next(Until), Global(Future), Global(Until), Next(Until)
-            match ((temp1outie, temp1innie), temp2) {
-                ((TemporalType::Next, TemporalType::Until), TemporalType::Global) => Err(ConstrainError {message : "Next(Until) and Global conflict".to_string()}),
-                ((TemporalType::Global, TemporalType::Future), TemporalType::Global) => 
-                ((TemporalType::Next, TemporalType::Until), TemporalType::Next) => 
-                ((TemporalType::Global, TemporalType::Future), TemporalType::Next) => 
-                ((TemporalType::Next, TemporalType::Until), TemporalType::Until) => 
-                ((TemporalType::Global, TemporalType::Future), TemporalType::Until) => 
-                ((TemporalType::Next, TemporalType::Until), TemporalType::Current) => 
-                ((TemporalType::Global, TemporalType::Future), TemporalType::Current) => 
-            }
-        },
-        (TempNest(temp1, type1), TempNest(temp2, type2)) => {
-            (Next(Until), Global(Future))
-            (Global(Future), Next(Until))
-            (Global(Future), Global(Future))
-            (Next(Until), Next(Until))
-        },
-        (Union(t1a, t1b), _) => {
-            check_temporal_conflicts(t1, new_ty)?;
-            check_temporal_conflicts(t2, new_ty)?;
-        },
-        (_, Union(t1a, t1b)) => {
-            panic!("This function is meant to accept only non-union `new_ty` arguments")
-        }
-    }
+pub fn calculate_hash<T: Hash>(t: &T) -> u64 {
+    let mut s = DefaultHasher::new();
+    t.hash(&mut s);
+    s.finish()
 }
 
-pub fn new_texpr(e : ast::TypedExpr, constraint : &types::Type, msg : String) -> Result<ast::TypedExpr, ConstrainError> {
+pub fn new_texpr(e : ast::TypedExpr, constraint : types::Type, msg : String) -> Result<ast::TypedExpr, errors::ConstrainError> {
     use ast::TypedExpr;
     match e {
         TypedExpr::TEConst(c, old_type) => {
-            let t = constrain(old_type, constraint, msg)?;
+            let t = constrain(&old_type, &constraint, msg)?;
             Ok(TypedExpr::TEConst(c, t))
         },
         TypedExpr::TEVar(v, old_type) => {
-            let t = constrain(old_type, constraint, msg)?;
+            let t = constrain(&old_type, &constraint, msg)?;
             Ok(TypedExpr::TEVar(v, t))
         },
         TypedExpr::TEBinop(b, e1, e2, old_type) => {
-            // let e1 = new_texpr(*e1, constraint, msg);
-            // let e2 = new_texpr(*e2, constraint, msg);
-            let t = constrain(old_type, constraint, msg)?;
+            let t = constrain(&old_type, &constraint, msg)?;
             Ok(TypedExpr::TEBinop(b, Box::new(*e1), Box::new(*e2), t))
         },
         TypedExpr::TEUnop(u, e1, old_type) => {
-            // let e1 = new_texpr(*e1, constraint, msg);
-            let t = constrain(old_type, constraint, msg)?;
+            let t = constrain(&old_type, &constraint, msg)?;
             Ok(TypedExpr::TEUnop(u, Box::new(*e1), t))
         },
         TypedExpr::TInput(old_type) => {
-            let t = constrain(old_type, constraint, msg)?;
+            let t = constrain(&old_type, &constraint, msg)?;
             Ok(TypedExpr::TInput(t))
         }
     }
 }
 
-pub fn type_of_typedexpr(e : &ast::TypedExpr) -> types::Type {
-    use ast::TypedExpr;
-    match e {
-        TypedExpr::TEConst(_, t) => t.clone(),
-        TypedExpr::TEVar(_, t) => t.clone(),
-        TypedExpr::TEBinop(_, _, _, t) => t.clone(),
-        TypedExpr::TEUnop(_, _, t) => t.clone(),
-        TypedExpr::TInput(t) => t.clone(),
-    }
-}
-
-pub fn infer_expr(e : ast::Expr, ctx : &mut TypeContext) -> Result<ast::TypedExpr, CompileTimeError> {
+pub fn infer_expr(e : ast::Expr, ctx : &mut TypeContext, until_dependencies : &mut types::UntilDependencies, udep_map : &mut HashMap<u64, ast::TypedExpr>) -> Result<ast::TypedExpr, errors::CompileTimeError> {
     use ast::Expr;
     use ast::TypedExpr;
+    use types::TemporalType;
+    use types::SimpleType;
+    use types::Type;
+
+    let temporal_undefined = TemporalType {
+        when_available : types::TemporalAvailability::Undefined,
+        when_dissipates : types::TemporalPersistency::Undefined,
+        is_until : None
+    };
+
     match e {
         Expr::EBinop(b, e1, e2) => {
             use ast::Binop;
-            let operand1 = infer_expr(*e1, ctx)?;
-            let operand2 = infer_expr(*e2, ctx)?;
+            let operand1 = infer_expr(*e1, ctx, until_dependencies, udep_map)?;
+            let operand2 = infer_expr(*e2, ctx, until_dependencies, udep_map)?;
 
             match b {
                 Binop::Plus | Binop::Minus | Binop::Times | Binop::Div => {
                     // temporal type is not (necessarily) encoded in arithmetic expression.
-                    //     thus, perhaps `let ty1 = types::Type::Prod(Nil, types::SimpleType::Int)`?
-                    let ty1 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int);
-                    let ty2 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int);
-                    let op1 = new_texpr(operand1, &ty1, "Left operand of an arithmetic binary operator must be an integer.".to_string())?;
-                    let op2 = new_texpr(operand2, &ty2, "Right operand of an arithmetic binary operator must be an integer.".to_string())?;
+                    //     thus, perhaps `let ty1 = types::Type(Nil, SimpleType::Int)`?
+                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Int);
+                    let ty2 = Type(temporal_undefined.clone(), SimpleType::Int);
+                    let op1 = new_texpr(operand1, ty1, "Left operand of an arithmetic binary operator must be an integer.".to_string())?;
+                    let op2 = new_texpr(operand2, ty2, "Right operand of an arithmetic binary operator must be an integer.".to_string())?;
 
-                    let t = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int);
+                    // add up until_dependencies
+
+                    let t = Type(temporal_undefined, SimpleType::Int);
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
                 },
                 Binop::Or | Binop::And => {
                     // todo: truthiness & split behaviors for `and` and `or`
                     // todo: negation as failure?
-                    let ty1 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Bool);
-                    let ty2 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Bool);
-                    let op1 = new_texpr(operand1, &ty1, "Left operand of a logical operator must be a boolean.".to_string())?;
-                    let op2 = new_texpr(operand2, &ty2, "Right operand of a logical operator must be a boolean.".to_string())?;
+                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
+                    let ty2 = Type(temporal_undefined.clone(), SimpleType::Bool);
+                    let op1 = new_texpr(operand1, ty1, "Left operand of a logical operator must be a boolean.".to_string())?;
+                    let op2 = new_texpr(operand2, ty2, "Right operand of a logical operator must be a boolean.".to_string())?;
 
-                    let t = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Bool);
+                    let t = Type(temporal_undefined, SimpleType::Bool);
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
                 },
                 Binop::Until => {
                     // todo: truthiness
-                    let ty1 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Undefined);
-                    let op1 = new_texpr(operand1, &ty1, "Left operand of Until should have type 'current'.".to_string())?;
-                    let ty2 = types::Type::Prod(types::TemporalType::Until, types::SimpleType::Bool);
-                    let op2 = new_texpr(operand2, &ty2, "Right operand of Until should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
+                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Undefined);
+                    let op1 = new_texpr(operand1, ty1, "Left operand of Until should have type 'current'.".to_string())?;
+                    let ty2 = Type(temporal_undefined, SimpleType::Bool);
+                    let op2 = new_texpr(operand2, ty2, "Right operand of Until should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
+                    until_dependencies.weak.push(calculate_hash(&op2));
+                    udep_map.insert(calculate_hash(&op2), op2.clone());
 
-                    let t = type_of_typedexpr(&op1);
+                    let t = ast::type_of_typedexpr(op1.clone());
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
                 },
                 Binop::SUntil => { // the same as `Until` because `SUntil(A, B) :- Until(A, B) and Finally(B)` can be done when translating to LTL/BA.
                     // todo: truthiness
-                    let ty1 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Undefined);
-                    let op1 = new_texpr(operand1, &ty1, "Left operand of SUntil should have type 'current'.".to_string())?;
-                    let ty2 = types::Type::Prod(types::TemporalType::Until, types::SimpleType::Bool);
-                    let op2 = new_texpr(operand2, &ty2, "Right operand of SUntil should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
+                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Undefined);
+                    let op1 = new_texpr(operand1, ty1, "Left operand of SUntil should have type 'current'.".to_string())?;
+                    let ty2 = Type(temporal_undefined, SimpleType::Bool);
+                    let op2 = new_texpr(operand2, ty2, "Right operand of SUntil should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
+                    until_dependencies.strong.push(calculate_hash(&op2));
+                    udep_map.insert(calculate_hash(&op2), op2.clone());
 
-                    let t = type_of_typedexpr(&op1);
+                    let t = ast::type_of_typedexpr(op1.clone());
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
                 }
             }
@@ -333,83 +168,170 @@ pub fn infer_expr(e : ast::Expr, ctx : &mut TypeContext) -> Result<ast::TypedExp
         Expr::EConst(c) => {
             use ast::Const;
             let t = match c {
-                Const::Bool(_) => types::Type::Prod(types::TemporalType::Current, types::SimpleType::Bool),
-                Const::Number(_) => types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int)
+                Const::Bool(_) => Type(temporal_undefined, SimpleType::Bool),
+                Const::Number(_) => Type(temporal_undefined, SimpleType::Int)
             };
             Ok(TypedExpr::TEConst(c, t))
         },
         Expr::EUnop(u, e1) => {
             use ast::Unop;
-            let operand1 = infer_expr(*e1, ctx)?;
+            let operand1 = infer_expr(*e1, ctx, until_dependencies, udep_map)?;
             match u {
                 Unop::Neg => {
-                    let ty1 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int);
-                    let op1 = new_texpr(operand1, &ty1, "Neg operator only works on integers.".to_string())?;
+                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Int);
+                    let op1 = new_texpr(operand1, ty1, "Neg operator only works on integers.".to_string())?;
 
-                    let t = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int);
+                    let t = Type(temporal_undefined, SimpleType::Int);
                     Ok(TypedExpr::TEUnop(u, Box::new(op1), t))
                 },
                 Unop::Not => {
                     // todo: truthiness
-                    let ty1 = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Bool);
-                    let op1 = new_texpr(operand1, &ty1, "Not operator only works on booleans.".to_string())?;
+                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
+                    let op1 = new_texpr(operand1, ty1, "Not operator only works on booleans.".to_string())?;
 
-                    let t = types::Type::Prod(types::TemporalType::Current, types::SimpleType::Bool);
+                    let t = Type(temporal_undefined, SimpleType::Bool);
                     Ok(TypedExpr::TEUnop(u, Box::new(op1), t))
                 }
             }
         },
         Expr::EVar(s) => {
-            let mut named_type = ctx.look_up(&s)?;
+            let named_type = ctx.look_up(&s)?;
             if types::is_currently_available(&named_type.get_temporal()) {
-                Ok(TypedExpr::TEVar(s, named_type))
+                Ok(TypedExpr::TEVar(s, Type(temporal_undefined, named_type.get_simpl())))
             } else {
-                Err(CurrentlyUnavailableError{message : 
+                Err(errors::CurrentlyUnavailableError{message : 
                     "Variable doesn't have `current` type.".to_string()})?
             }            
         },
-        Expr::Input => Ok(TypedExpr::TInput(types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int)))
+        Expr::Input => Ok(TypedExpr::TInput(Type(temporal_undefined, types::SimpleType::Int)))
     }
 }
 
-// -> TypeError since infer_expr may result in ConstrainError
-pub fn infer_command(cmd : ast::Command, ctx : &mut TypeContext) -> Result<ast::TypedCommand, CompileTimeError> {
-    println!("     TIMESTEP {:?}    Command {:?}", ctx.clock, cmd);
+// -> errors::TypeError since infer_expr may result in errors::ConstrainError
+pub fn infer_command(cmd : ast::Command, ctx : &mut TypeContext, udep_map : &mut HashMap<u64, ast::TypedExpr>) -> Result<ast::TypedCommand, errors::CompileTimeError> {
+    // println!("     TIMESTEP {:?}    Command {:?}", ctx.clock, cmd);
     use ast::Command;
     use ast::TypedCommand;
     use types::Type;
     use types::TemporalType;
+
+    /*
+        Global  : current, always   , false
+        Next    : next   , fleeting , false
+        Current : current, fleeting , false
+        Until   : current, lingering, true
+
+        Next(Until)    : next   , fleeting , true
+        Global(Until)  : current, always   , true
+        Global(Future) : future , always   , false
+
+        Global(Future(Until)) : future, always, true
+    */
+
+    let mut blank_until_dependencies = types::UntilDependencies {weak : Vec::new(), strong : Vec::new()};
     match cmd {
         Command::Timestep => {
             panic!("Huh, timesteps should've been taken out with `split`... Why was `infer_command` called on one?")
         },
         Command::Global(v, e) => {
-            let te = infer_expr(e, ctx)?;
-            let t = Type::Prod(TemporalType::Global, type_of_typedexpr(&te).get_simpl());
-            ctx.add_name(&v, t);
+            let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
+            let t = if blank_until_dependencies.is_empty() {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Current,
+                    when_dissipates : types::TemporalPersistency::Always,
+                    is_until : None
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            } else {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Current,
+                    when_dissipates : types::TemporalPersistency::Always,
+                    is_until : Some(blank_until_dependencies)
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            };
+            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            ctx.add_name(&v, t)?;
             Ok(TypedCommand::TGlobal(v, te))
         },
         Command::Next(v, e) => {
-            let te = infer_expr(e, ctx)?;
-            let t = Type::Prod(TemporalType::Next, type_of_typedexpr(&te).get_simpl());
-            ctx.add_name(&v, t);
+            let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
+            let t = if blank_until_dependencies.is_empty() {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Next,
+                    when_dissipates : types::TemporalPersistency::Fleeting,
+                    is_until : None
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            } else {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Next,
+                    when_dissipates : types::TemporalPersistency::Fleeting,
+                    is_until : Some(blank_until_dependencies)
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            };
+            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            ctx.add_name(&v, t)?;
             Ok(TypedCommand::TNext(v, te))
         },
         Command::Update(v, e) => {
-            let te = infer_expr(e, ctx)?;
-            let t = Type::Prod(TemporalType::Future, type_of_typedexpr(&te).get_simpl());
-            ctx.add_name(&v, t);
+            let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
+            let t = if blank_until_dependencies.is_empty() {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Next,
+                    when_dissipates : types::TemporalPersistency::Fleeting,
+                    is_until : Some(blank_until_dependencies)
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            } else {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Next,
+                    when_dissipates : types::TemporalPersistency::Fleeting,
+                    is_until : Some(blank_until_dependencies)
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            };
+            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            ctx.add_name(&v, t)?;
             Ok(TypedCommand::TUpdate(v, te))
         },
         Command::Finally(v, e) => {
-            let te = infer_expr(e, ctx)?;
-            let t = Type::TempNest(TemporalType::Global, Box::new(Type::Prod(TemporalType::Future, type_of_typedexpr(&te).get_simpl())));
-            ctx.add_name(&v, t);
+            let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
+            let t = if blank_until_dependencies.is_empty() {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Future,
+                    when_dissipates : types::TemporalPersistency::Always,
+                    is_until : None
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            } else {
+                Type(TemporalType {
+                    when_available : types::TemporalAvailability::Future,
+                    when_dissipates : types::TemporalPersistency::Always,
+                    is_until : Some(blank_until_dependencies)
+                    },
+                    ast::type_of_typedexpr(te.clone()).get_simpl()
+                )
+            };
+            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            ctx.add_name(&v, t)?;
             Ok(TypedCommand::TFinally(v, te))
         },
         Command::Print(e) => {
-            let te = infer_expr(e, ctx)?;
-            Ok(TypedCommand::TPrint(te))
+            let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
+            if blank_until_dependencies.is_empty() {
+                Ok(TypedCommand::TPrint(te))
+            } else {
+                Err(errors::TemporalConflictError {message : "Why are you trying to print an until expression? Just simplify it...".to_string()})?
+            }
         }
     }
 }
@@ -420,13 +342,12 @@ pub fn infer_command(cmd : ast::Command, ctx : &mut TypeContext) -> Result<ast::
 */
 
 /*
-pub enum TemporalType {
-    Undefined,
-    Until,
-    Future,
-}
+    | x = e         // Global
+    | x <X e        // Next
+    | x <- e        // Next(Until)
+    | x <.. e       // Global(Future)
 */
-pub fn dupe_check_cmd(cmd : ast::Command, var_assign : &mut HashMap<ast::Var, (bool, bool, bool)>) -> Result<(), DupeAssignError> {
+pub fn dupe_check_cmd(cmd : ast::Command, var_assign : &mut HashMap<ast::Var, (bool, bool, bool)>) -> Result<(), errors::DupeAssignError> {
     use ast::Command;
     match cmd {
         Command::Timestep => {
@@ -434,10 +355,10 @@ pub fn dupe_check_cmd(cmd : ast::Command, var_assign : &mut HashMap<ast::Var, (b
         },
         Command::Global(v, _) => {
             if var_assign.get(&v).unwrap_or(&(false, false, false)).0 {
-                Err(DupeAssignError 
+                Err(errors::DupeAssignError 
                     {message : "Attempted Global assignment to a variable that was already Globally assigned to inside this timestep.".to_string()})
             } else {
-                if let Some(tup) = var_assign.get(&v) {
+                if let Some(tup) = var_assign.clone().get(&v) {
                     var_assign.insert(v, (true, tup.1, tup.2));
                 } else {
                     var_assign.insert(v, (false, false, false));
@@ -447,10 +368,10 @@ pub fn dupe_check_cmd(cmd : ast::Command, var_assign : &mut HashMap<ast::Var, (b
         }, 
         Command::Next(v, _) => {
             if var_assign.get(&v).unwrap_or(&(false, false, false)).1 {
-                Err(DupeAssignError
+                Err(errors::DupeAssignError
                     {message : "Attempted Next assignment to a variable that was already Nextly or Updatedly assigned to inside this timestep.".to_string()})
             } else {
-                if let Some(tup) = var_assign.get(&v) {
+                if let Some(tup) = var_assign.clone().get(&v) {
                     var_assign.insert(v, (tup.1, true, tup.2));
                 } else {
                     var_assign.insert(v, (false, false, false));
@@ -460,10 +381,10 @@ pub fn dupe_check_cmd(cmd : ast::Command, var_assign : &mut HashMap<ast::Var, (b
         },
         Command::Update(v, _) => {
             if var_assign.get(&v).unwrap_or(&(false, false, false)).1 {
-                Err(DupeAssignError 
+                Err(errors::DupeAssignError 
                     {message : "Attempted Update assignment to a variable that was already Nextly or Updatedly assigned to inside this timestep.".to_string()})
             } else {
-                if let Some(tup) = var_assign.get(&v) {
+                if let Some(tup) = var_assign.clone().get(&v) {
                     var_assign.insert(v, (tup.1, true, tup.2));
                 } else {
                     var_assign.insert(v, (false, false, false));
@@ -473,10 +394,10 @@ pub fn dupe_check_cmd(cmd : ast::Command, var_assign : &mut HashMap<ast::Var, (b
         },
         Command::Finally(v, _) => {
             if var_assign.get(&v).unwrap_or(&(false, false, false)).1 {
-                Err(DupeAssignError
+                Err(errors::DupeAssignError
                     {message : "Attempted Finally assignment to a variable that was already Finally assigned to inside this timestep.".to_string()})
             } else {
-                if let Some(tup) = var_assign.get(&v) {
+                if let Some(tup) = var_assign.clone().get(&v) {
                     var_assign.insert(v, (tup.1, true, tup.2));
                 } else {
                     var_assign.insert(v, (false, false, false));
@@ -488,17 +409,17 @@ pub fn dupe_check_cmd(cmd : ast::Command, var_assign : &mut HashMap<ast::Var, (b
     }
 }
 
-pub fn dupe_check(block : Vec<ast::Command>) -> Result<(), AssignError> {
+pub fn dupe_check(block : Vec<ast::Command>) -> Result<(), errors::AssignError> {
     // {var_name : (is_global, is_next_or_update, is_future)}
     let mut var_assign = HashMap::new();
     block.iter().try_for_each(|cmd| dupe_check_cmd(cmd.clone(), &mut var_assign))?;
     Ok(())
 }
 
-pub fn infer_timeblock(block : Vec<ast::Command>, ctx : &mut TypeContext) -> Result<ast::TypedTimeBlock, CompileTimeError> {
-    println!("old variables: {:?}", ctx.vars);
-    let cmds : Result<ast::TypedTimeBlock, _> = block.iter().map(|cmd| infer_command(cmd.clone(), ctx)).collect();
-    println!("new variables: {:?}", ctx.vars);
+pub fn infer_timeblock(block : Vec<ast::Command>, ctx : &mut TypeContext, udep_map : &mut HashMap<u64, ast::TypedExpr>) -> Result<ast::TypedTimeBlock, errors::CompileTimeError> {
+    // println!("old variables: {:?}", ctx.vars);
+    let cmds : Result<ast::TypedTimeBlock, _> = block.iter().map(|cmd| infer_command(cmd.clone(), ctx, udep_map)).collect();
+    // println!("new variables: {:?}", ctx.vars);
     ctx.step_time();
 
     cmds
@@ -549,7 +470,7 @@ pub fn defined_var_of_command(cmd : &ast::Command) -> Option<ast::Var> {
     }
 }
 
-pub fn arrange_by_dependencies(block : Vec<ast::Command>) -> Result<Vec<ast::Command>, CircularAssignError> {
+pub fn arrange_by_dependencies(block : Vec<ast::Command>) -> Result<Vec<ast::Command>, errors::CircularAssignError> {
     // let defined_vars : ast::DefVars = HashSet::from_iter(block.iter().filter_map(defined_var_of_command));
 
     let a = block.iter().map(|cmd| (defined_var_of_command(cmd), cmd.clone()));
@@ -564,6 +485,8 @@ pub fn arrange_by_dependencies(block : Vec<ast::Command>) -> Result<Vec<ast::Com
         ).filter(|(def_var, _)| def_var.is_some()).map(|(def_var, free_vars)| (def_var.unwrap(), free_vars)) // if `defined_vars.contains(tup.0)`
     );
 
+    // println!("free_vars_by_cmd = {:?}", free_vars_by_cmd);
+
     // scan for recursive definitions. since `defined_vars_of_command` excludes next/update, all recursive definitions are blocked.
     
     let mut graph = Graph::<Var, i32>::new();
@@ -574,19 +497,32 @@ pub fn arrange_by_dependencies(block : Vec<ast::Command>) -> Result<Vec<ast::Com
     // }
     for (origin, destinations) in free_vars_by_cmd.iter() {
         for dest in destinations {
-            graph.add_edge(*var_map.get(origin).unwrap(), *var_map.get(dest).unwrap(), 1);
+            graph.add_edge(*var_map.get(dest).unwrap(), *var_map.get(origin).unwrap(), 1);
         }
     }
 
     match toposort(&graph, None) {
         Ok(order) => {
             let top_order : Vec<Var> = order.iter().map(|node| graph.node_weight(node.clone()).unwrap().clone()).collect();
-            let cmd_by_var : HashMap<Var, ast::Command> = block.iter().map(|cmd| (defined_var_of_command(&cmd), cmd)).filter(|(v, _)| v.is_some()).map(|(v, cmd)| (v.unwrap(), cmd.clone())).collect();
-            Ok(top_order.iter().map(|var| cmd_by_var.get(var).unwrap().clone()).chain(delayed_commands.into_iter()).collect())
+
+            let mut cmd_by_var : HashMap<Var, Vec<ast::Command>> = HashMap::new();
+            for cmd in block.into_iter() {
+                if let Some(def_var) = defined_var_of_command(&cmd) {
+                    cmd_by_var.entry(def_var).or_default().push(cmd);
+                }
+                
+            }
+
+            let mut cmd_order : Vec<ast::Command> = Vec::new();
+            for var in top_order.iter() {
+                cmd_order.append(&mut cmd_by_var.get(var).unwrap().clone());
+            }
+            cmd_order.append(&mut delayed_commands.clone());
+            Ok(cmd_order)
         },
         Err(err) => {
             Err(
-                CircularAssignError {
+                errors::CircularAssignError {
                     message : format!("Error: Graph has cycle with node: {}", graph.node_weight(err.node_id()).unwrap().as_str()).to_string()
                 }
             )
@@ -594,94 +530,62 @@ pub fn arrange_by_dependencies(block : Vec<ast::Command>) -> Result<Vec<ast::Com
     }
 }
 
-pub fn infer_program(program : ast::Program) -> Result<ast::TypedProgram, CompileTimeError> {
+pub fn infer_program(program : ast::Program) -> Result<ast::TypedProgram, errors::CompileTimeError> {
     let mut ctx = TypeContext {
         vars : HashMap::new(),
         clock : 0
     };
+
+    let mut udep_map : HashMap<u64, ast::TypedExpr> = HashMap::new();
 
     // don't filter out empty blocks since `---\n---` is valid.
     let time_blocks : Vec<_> = program.split(|cmd| *cmd == ast::Command::Timestep).map(|tb| tb.to_vec()).collect();
 
     time_blocks.clone().iter().try_for_each(|tb| dupe_check(tb.clone()))?;
 
-    let arranged_program : Vec<Result<Vec<ast::Command>, CircularAssignError>> = time_blocks.into_iter().map(|tb| arrange_by_dependencies(tb)).collect();
-    let arranged_program : Result<Vec<Vec<ast::Command>>, CircularAssignError> = arranged_program.into_iter().collect();
+    let arranged_program : Vec<Result<Vec<ast::Command>, errors::CircularAssignError>> = time_blocks.into_iter().map(|tb| arrange_by_dependencies(tb)).collect();
+    let arranged_program : Result<Vec<Vec<ast::Command>>, errors::CircularAssignError> = arranged_program.into_iter().collect();
     let arranged_program = arranged_program?;
-    let inferred_program : Result<Vec<Vec<ast::TypedCommand>>, CompileTimeError> = arranged_program.iter().map(|block| infer_timeblock(block.to_vec(), &mut ctx)).collect();
-    Ok(inferred_program?)
+
+    // println!("Arranged : {:?}", arranged_program);
+    let inferred_program : Vec<Vec<ast::TypedCommand>> = arranged_program.iter().map(|block| infer_timeblock(block.to_vec(), &mut ctx, &mut udep_map)).collect::<Result<_, _>>()?;
+    Ok(ast::TypedProgram {
+        code: inferred_program,
+        udep_map: udep_map,
+    })
 }
 
-
-// wrapper's SimpleType should be `Nil`
-pub fn wrap(ty : types::Type, wrapper : types::Type) -> types::Type {
-    use types::Type;
-    use types::TemporalType;
-    use types::SimpleType;
-
-    match (ty.clone(), wrapper) {
-        (Type::Prod(TemporalType::Current, simpl), Type::Prod(tem, SimpleType::Undefined)) => Type::Prod(tem, simpl),
-        (Type::Prod(TemporalType::Current, _), Type::TempNest(tem, nested)) => Type::Prod(tem, wrap(ty, *nested).get_simpl()),
-        (Type::Prod(TemporalType::Undefined, simpl), Type::Prod(tem, SimpleType::Undefined)) => Type::Prod(tem, simpl),
-        (Type::Prod(TemporalType::Undefined, _), Type::TempNest(tem, nested)) => Type::Prod(tem, wrap(ty, *nested).get_simpl()),
-        _ => panic!("How the heckings did it reach this?")
-    }
-}
-
-
-// `con_ty` should be `crate::types::Type::Prod(Current, SimpleType)`
-pub fn constrain(te : types::Type, con_ty : &types::Type, msg : String) -> Result<types::Type, ConstrainError> {
+// `con_ty` should be `crate::types::Type(Current, SimpleType)`
+pub fn constrain(te : &types::Type, con_ty : &types::Type, msg : String) -> Result<types::Type, errors::ConstrainError> {
     use types::TemporalType;
     use types::SimpleType;
     use types::Type;
 
-    match (te, (*con_ty).clone()) {
-        (Type::Union(a, b), _) => {
-            let constrained_a = constrain(*a, con_ty, msg.clone());
-            let constrained_b = constrain(*b, con_ty, msg.clone());
+    let Type(temp1, simp1) = te;
+    let Type(temp2, simp2) = con_ty;
 
-            if constrained_a.is_ok() {
-                if constrained_b.is_ok() {
-                    Ok(Type::Union(Box::new(constrained_a.unwrap()), Box::new(constrained_b.unwrap())))
-                } else {
-                    Ok(constrained_a.unwrap())
-                }
-            } else {
-                if constrained_b.is_ok() {
-                    Ok(constrained_b.unwrap())
-                } else {
-                    Err(ConstrainError {message : msg})
-                }
-            }
-        },
-        (Type::TempNest(a, b), Type::Prod(c, _)) => {
-            if a == TemporalType::Undefined {
-                constrain(*b, con_ty, msg)
-            } else if c == TemporalType::Undefined {
-                Ok(Type::TempNest(a, Box::new(constrain(*b, con_ty, msg).expect("Constraint error"))))
-            } else if (a == TemporalType::Global) || (a == TemporalType::Current) || (a == TemporalType::Until) || (a == TemporalType::Future) {
-                constrain(*b, con_ty, msg)
-            } else {
-                Err(ConstrainError {message : msg})
-            }
-        },
-        (Type::Prod(a, b), Type::Prod(c, d)) => {
-            if b == d || b == SimpleType::Undefined || d == SimpleType::Undefined {
-                // if both `b` and `d` are SimpleType::Undefined, `simp_t` should be SimpleType::Undefined as well.
-                let simp_t = if b == SimpleType::Undefined { d } else { b };
-                match (a.clone(), c.clone()) {
-                    (TemporalType::Undefined, _) => Ok(Type::Prod(c, simp_t)),
-                    (_, TemporalType::Undefined) => Ok(Type::Prod(a, simp_t)),  // if both `a` and `c` are Nil, the temporaltype is just Nil.
-                    (TemporalType::Global, TemporalType::Current) => Ok(Type::Prod(TemporalType::Current, simp_t)),  // the other way won't work since `Current` doesn't necessarily mean `Global`.
-                    (TemporalType::Until, TemporalType::Current) => Ok(Type::Prod(TemporalType::Current, simp_t)),
-                    // (TemporalType::Future, TemporalType::Current) => Ok(Type::Prod(TemporalType::Current, simp_t)),
-                    (TemporalType::Current, TemporalType::Current) => Ok(Type::Prod(TemporalType::Current, simp_t)),
-                    _ => Err(ConstrainError {message : msg})
-                }
-            } else {
-                Err(ConstrainError {message : msg})
-            }
-        },
-        _ => Err(ConstrainError {message : msg})
-    }
+    let simp = match (simp1, simp2) {
+        (SimpleType::Undefined, b) => b,
+        (a, SimpleType::Undefined) => a,
+        (a, b) if a == b => a,
+        _ => Err(errors::ConstrainError {message : msg.clone()})?
+    };
+
+    let temp = match (temp1, temp2) {
+        (TemporalType {
+            when_available : types::TemporalAvailability::Undefined,
+            when_dissipates : types::TemporalPersistency::Undefined,
+            is_until : None
+        }, b) => b,
+        (a, TemporalType {
+            when_available : types::TemporalAvailability::Undefined,
+            when_dissipates : types::TemporalPersistency::Undefined,
+            is_until : None
+        }) => a,
+        // I doubt I'll need to add cases like `(Global, Current)`, but perhaps I'll need to
+        (a, b) if a == b => a,
+        _ => Err(errors::ConstrainError {message : msg})?
+    };
+
+    Ok(Type(temp.clone(), simp.clone()))
 }

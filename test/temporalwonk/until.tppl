@@ -3,13 +3,12 @@ z <.. false
 x <.. 0
 x = 1 <!> !y & z
 ---
----
+print x  # 1
 y <X true
 ---
-x <- 2 <!> y
----
-print(x)
+print y  # true
+print x  # 1
 ---
 z <- true
 ---
-print(x)
+print x  # 0

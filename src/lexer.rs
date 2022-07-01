@@ -1,5 +1,5 @@
-use core::fmt;
 use chumsky::prelude::*;
+use core::fmt;
 
 // https://github.com/zesterer/chumsky/blob/master/examples/nano_rust.rs is pretty useful for this
 
@@ -7,6 +7,8 @@ pub type Span = std::ops::Range<usize>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Token {
+    LPAREN,
+    RPAREN,
     NEWLINE,
     THREEDASH,
     EQUAL,
@@ -19,7 +21,7 @@ pub enum Token {
     PRINT,
     Op(String),
     Number(String),
-    Var(String)
+    Var(String),
 }
 
 impl fmt::Display for Token {
@@ -37,7 +39,9 @@ impl fmt::Display for Token {
             Token::PRINT => write!(f, "print"),
             Token::Op(s) => write!(f, "Op {}", s),
             Token::Number(n) => write!(f, "Num {}", n),
-            Token::Var(s) => write!(f, "Var {}", s) 
+            Token::Var(s) => write!(f, "Var {}", s),
+            Token::LPAREN => write!(f, "("),
+            Token::RPAREN => write!(f, ")"),
         }
     }
 }
@@ -51,8 +55,8 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
         .map(Token::Number);
 
     // Before the op set for THREEDASH
-    let multiop =
-        just("\n").to(Token::NEWLINE)
+    let multiop = just("\n")
+        .to(Token::NEWLINE)
         .or(just("---").to(Token::THREEDASH))
         .or(just("==").to(Token::Op("==".to_owned())))
         .or(just("=").to(Token::EQUAL))
@@ -60,31 +64,45 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
         .or(just("<-").to(Token::LARROW))
         .or(just("<..").to(Token::FUTURE));
 
-    let op = one_of("+-*/&|!<>")
-        .repeated()
-        .exactly(1)
-        .collect::<String>()
-        .map(Token::Op);
+    let op = just("<!>")
+        .to(Token::Op("<!>".to_owned()))
+        .or(just("<!!>").to(Token::Op("<!!>".to_owned())))
+        .or(one_of("+-*/&|!<>")
+            .repeated()
+            .exactly(1)
+            .collect::<String>()
+            .map(Token::Op));
 
-    let ident = 
-            text::ident().map(|ident: String| match ident.as_str() {
-        "true"  =>  Token::TRUE,
-        "false" =>  Token::FALSE,
-        "input" =>  Token::INPUT,
-        "print" =>  Token::PRINT,
-        _       =>  Token::Var(ident),
+    let ident = text::ident().map(|ident: String| match ident.as_str() {
+        "true" => Token::TRUE,
+        "false" => Token::FALSE,
+        "input" => Token::INPUT,
+        "print" => Token::PRINT,
+        _ => Token::Var(ident),
     });
+
+    let punctuation = just("(").to(Token::LPAREN).or(just(")").to(Token::RPAREN));
 
     let token = num
         .or(num)
         .or(multiop)
         .or(op)
         .or(ident)
+        .or(punctuation)
         .recover_with(skip_then_retry_until([]));
 
-    let comment = just("//").then(take_until(just('\n'))).padded();
+    // let comment = just("//").then(take_until(just('\n'))).padded();
+    let comment = just("#")
+        .then_ignore(take_until(end().or(just("\n").ignored())))
+        .padded();
 
     let whitespace = just(" ").or(just("\t"));
+
+    // token
+    //     .map_with_span(|tok, span| (tok, span))
+    //     .padded_by(comment.repeated())
+    //     .padded_by(whitespace.repeated())
+    //     .repeated()
 
     token
         .map_with_span(|tok, span| (tok, span))

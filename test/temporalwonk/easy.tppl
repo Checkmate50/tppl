@@ -1,0 +1,15 @@
+x <.. 0
+y <.. false
+print x  # 0
+print y  # false
+---
+x <- 3 <!> y
+print x  # 0
+print y  # false
+---
+y <- true
+print x  # 3
+print y  # false
+---
+print x  # 0
+print y  # true

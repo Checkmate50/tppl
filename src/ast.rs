@@ -1,11 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::types;
 
-
-#[derive(Clone)]
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum Const {
     Bool(bool),
     Number(i64),
@@ -13,9 +10,7 @@ pub enum Const {
 
 pub type Var = String;
 
-#[derive(Clone)]
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum Binop {
     Plus,
     Minus,
@@ -27,17 +22,13 @@ pub enum Binop {
     SUntil,
 }
 
-#[derive(Clone)]
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum Unop {
     Neg,
-    Not
+    Not,
 }
 
-#[derive(Clone)]
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum Expr {
     EConst(Const),
     EVar(Var),
@@ -46,9 +37,7 @@ pub enum Expr {
     Input,
 }
 
-#[derive(Clone)]
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum Command {
     Timestep,
     Global(Var, Expr),
@@ -60,9 +49,7 @@ pub enum Command {
 
 pub type Program = Vec<Command>;
 
-
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum TypedExpr {
     TEConst(Const, types::Type),
     TEVar(Var, types::Type),
@@ -71,9 +58,7 @@ pub enum TypedExpr {
     TInput(types::Type),
 }
 
-
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum TypedCommand {
     TGlobal(Var, TypedExpr),
     TNext(Var, TypedExpr),
@@ -82,11 +67,24 @@ pub enum TypedCommand {
     TPrint(TypedExpr),
 }
 
-// `y` is the free var in `f(x) = x * y` 
+// `y` is the free var in `f(x) = x * y`
 pub type FreeVars = HashSet<Var>;
 // only counts Global/Finally since those are the only immediately available.
 pub type DefVars = HashSet<Var>;
 
 pub type TypedTimeBlock = Vec<TypedCommand>;
 
-pub type TypedProgram = Vec<TypedTimeBlock>;
+pub struct TypedProgram {
+    pub code: Vec<TypedTimeBlock>,
+    pub udep_map: HashMap<u64, TypedExpr>,
+}
+
+pub fn type_of_typedexpr(e: TypedExpr) -> types::Type {
+    match e {
+        TypedExpr::TEConst(_, t) => t,
+        TypedExpr::TEVar(_, t) => t,
+        TypedExpr::TEBinop(_, _, _, t) => t,
+        TypedExpr::TEUnop(_, _, t) => t,
+        TypedExpr::TInput(t) => t,
+    }
+}

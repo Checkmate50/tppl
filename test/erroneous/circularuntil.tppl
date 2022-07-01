@@ -1,0 +1,6 @@
+a <.. false
+b <.. true
+b <- false <!> a
+---
+c = b & a
+a = true <!> b

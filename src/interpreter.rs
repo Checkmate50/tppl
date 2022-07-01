@@ -2,140 +2,21 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::ast;
+use crate::errors;
 use crate::types;
-use crate::typecheck;
-use ast::TypedExpr;
 use ast::TypedCommand;
-use types::Type;
-use types::SimpleType;
-use types::TemporalType;
+use ast::TypedExpr;
 use ast::Var;
+use types::TemporalType;
+use types::Type;
 
-#[derive(Debug)]
-pub struct NameError {
-    message : String
-}
-#[derive(Debug)]
-pub struct InputError {
-    message : String
-}
-// `a <!> true`
-#[derive(Debug)]
-pub struct UntilVoidError {
-    message : String
-}
-// `a <!> (some_val_that_ain't_ever_true)`
-#[derive(Debug)]
-pub struct SUntilConditionUnsatisfied {
-    message : String
-}
-// example: trying to access a next
-#[derive(Debug)]
-pub struct CurrentlyUnavailableError {
-    message : String
-}
-#[derive(Debug)]
-pub enum ExecutionTimeError {
-    // Should I put `Name`, `Input`, `Until`, `SUntil`, and `Immediate` in some new `AccessError`?
-    Type(typecheck::TypeError),
-    Assign(typecheck::AssignError),
-    Name(NameError),
-    Input(InputError),
-    Until(UntilVoidError),
-    SUntil(SUntilConditionUnsatisfied),
-    Immediacy(CurrentlyUnavailableError)
-}
-impl From<typecheck::TypeError> for ExecutionTimeError {
-    fn from(e: typecheck::TypeError) -> Self {
-        ExecutionTimeError::Type(e)
-    }
-}
-impl From<typecheck::AssignError> for ExecutionTimeError {
-    fn from(e: typecheck::AssignError) -> Self {
-        ExecutionTimeError::Assign(e)
-    }
-}
-impl From<NameError> for ExecutionTimeError {
-    fn from(e: NameError) -> Self {
-        ExecutionTimeError::Name(e)
-    }
-}
-impl From<InputError> for ExecutionTimeError {
-    fn from(e: InputError) -> Self {
-        ExecutionTimeError::Input(e)
-    }
-}
-impl From<UntilVoidError> for ExecutionTimeError {
-    fn from(e: UntilVoidError) -> Self {
-        ExecutionTimeError::Until(e)
-    }
-}
-impl From<SUntilConditionUnsatisfied> for ExecutionTimeError {
-    fn from(e: SUntilConditionUnsatisfied) -> Self {
-        ExecutionTimeError::SUntil(e)
-    }
-}
-impl From<CurrentlyUnavailableError> for ExecutionTimeError {
-    fn from(e: CurrentlyUnavailableError) -> Self {
-        ExecutionTimeError::Immediacy(e)
-    }
-}
+pub type Value = (Type, TypedExpr);
 
-// impl fmt::Display for ExecutionTimeError {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         let err_msg = match self.code {
-//             404 => "Sorry, Can not find the Page!",
-//             _ => "Sorry, something is wrong! Please Try Again!",
-//         };
-// 
-//         write!(f, "{}", err_msg)
-//     }
-// }
-
-
-#[derive(Clone)]
-#[derive(Debug)]
-pub struct UntilLog {
-    pub strong : Vec<TypedExpr>,
-    pub weak : Vec<TypedExpr>
-}
-
-#[derive(Clone)]
-#[derive(Debug)]
-pub enum Value {
-    Expression(types::Type, TypedExpr, UntilLog),
-    Union(Box<Value>, Box<Value>)  // perhaps instead use `{current/global : val, next/update : val, finally : val}`?
-}
-
-// should this be in `impl Value {}`?
-pub fn advance_time(val : Value) -> Option<Value> {
-    match val {
-        Value::Expression(t, v, u) => {
-            let aged_type = *types::advance_type(Box::new(t))?;
-            Some(Value::Expression(aged_type, v, u))
-        },
-        Value::Union(a, b) => {
-            let aged_a = advance_time(*a);
-            let aged_b = advance_time(*b);
-
-            if let Some(ref a) = aged_a {
-                if let Some(ref b) = aged_b {
-                    Some(Value::Union(Box::new(a.clone()), Box::new(b.clone())))
-                } else {
-                    aged_a
-                }
-            } else {
-                aged_b
-            }
-        }
-    }
-}
-
-
-#[derive(Clone)]
-#[derive(Debug)]
+type Count = u8;
+#[derive(Clone, PartialEq, Debug)]
 pub struct VarContext {
-    pub vars: HashMap<Var, Value>,
+    // Vec<ValueID> rather than HashSet<ValueID> since the length will be at most 3, so "O(n) vs O(1) remove" doesn't mean anything.
+    pub vars: HashMap<Var, Vec<Value>>,
     /*
     Of the form (independent, dependencies).
     For example, ```
@@ -143,383 +24,561 @@ pub struct VarContext {
         a = x <!> y
     ``` would be `{y: {x, a}, c : {x}}`
     */
-    // one possible optimization: use *value* rather than the variable (which can be associated with multiple values)
-    pub until_dependencies : HashMap<Var, HashSet<Var>>,
-    pub clock: i32
+    pub until_dependencies_tracker: HashMap<Var, HashMap<Var, Count>>,
+    // key is `hash(texpr)` and value is `texpr`
+    pub udep_map: HashMap<u64, ast::TypedExpr>,
+    pub clock: i32,
 }
 
 impl VarContext {
-    pub fn look_up(&mut self, var_name: &Var) -> Result<Value, NameError> {
-        if let Some(val) = self.vars.get(var_name) {
-            Ok(get_most_immediate_val(val).clone())
+    pub fn look_up(&mut self, var_name: &Var) -> Result<Value, errors::ExecutionTimeError> {
+        println!("\n\nlookedup {}\n\nin vars:\n{:?}", var_name, self.vars);
+        if let Some(values) = self.vars.get(var_name) {
+            if let Some(v) = get_most_immediate_value(values.to_owned()).clone() {
+                Ok(v)
+            } else {
+                Err(errors::CurrentlyUnavailableError {
+                    message: format!(
+                        "Name only has {:?}, which aren't immediately available.",
+                        values
+                    )
+                    .to_string(),
+                })?
+            }
         } else {
-            Err(NameError{message : format!("There is no variable with name {}", var_name).to_string()})   
+            Err(errors::NameError {
+                message: format!("There is no variable with name {}", var_name).to_string(),
+            })?
         }
     }
 
-    pub fn add_var(&mut self, var_name: &Var, data: &TypedExpr, typ: &Type, until_tracker : &UntilLog) -> () {
-        let v = Value::Expression(typ.clone(), data.clone(), until_tracker.clone());
-        if let Some(vals) = self.vars.get(var_name) {
-            self.vars.insert(var_name.to_string(), Value::Union(Box::new(v), Box::new(vals.clone())));
+    pub fn add_var(
+        &mut self,
+        var_name: &Var,
+        data: &TypedExpr,
+        typ: &Type,
+    ) -> Result<(), errors::ExecutionTimeError> {
+        let new_val: Value = (typ.clone(), data.clone());
+        println!(
+            "\n\nadded to name {} value {:?}",
+            var_name.clone(),
+            new_val.clone()
+        );
+        if let Some(values) = self.vars.clone().get_mut(var_name) {
+            let typs: Vec<Type> = values.iter().map(|(t, _)| t.to_owned()).collect();
+            types::resolve_temporal_conflicts(typs, typ.clone(), false)?;
+            values.push(new_val);
+            self.vars.insert(var_name.to_owned(), values.to_owned());
         } else {
-            self.vars.insert(var_name.to_string(), v);
+            self.vars.insert(var_name.to_owned(), [new_val].to_vec());
         }
-    }
 
-    pub fn step_time(&mut self) -> () {
-        self.clock += 1;
-        self.vars = self.vars.iter().map(|(name, val)| (name.clone(), advance_time(val.clone()))).filter(|(_, val)| val.is_some()).map(|(name, val)| (name, val.unwrap())).collect();
-    }
-
-    pub fn add_until_dependencies(&mut self, target : &Var, until_tracker : &UntilLog) -> () {
-        let weak = HashSet::<_>::from_iter(until_tracker.clone().weak.into_iter().map(free_vars_of_texpr).flatten());
-        let strong = HashSet::<_>::from_iter(until_tracker.clone().strong.into_iter().map(free_vars_of_texpr).flatten());
-
-        // add to until_dependencies
-        for independent in weak.union(&strong) {
-            // let dependents : HashMap<_> = self.until_dependencies.entry(independent.to_string()).or_insert(HashSet::new()).union(&HashSet::from_iter([target.clone()].iter())).collect();
-            // self.until_dependencies.insert(independent.to_string(), dependents);
-
-            let dependents = self.until_dependencies.entry(independent.to_string()).or_insert(HashSet::new());
-            dependents.insert(target.clone());
+        if let Some(until_dependencies) = typ.get_temporal().is_until {
+            self.add_until_dependencies(var_name, &until_dependencies);
         }
+
+        self.detect_cycle_until_dep(var_name)?;
+
+        self.refresh_dependents(var_name)?;
+
+        Ok(())
     }
 
-    // checks and deletes values accordingly
-    pub fn check_until_dependencies(&mut self, var_name : &Var) -> Result<(), ExecutionTimeError> {
-        if let Some(dependents) = self.clone().until_dependencies.get(var_name) {
-            for dependent in dependents {
-                if let Some(dependent_val) = self.clone().vars.get(dependent) {
-                    if let Some(val) = filter_value(dependent_val.clone(), self)? {
-                        self.vars.insert(var_name.to_string(), val);
+    pub fn refresh_dependents(&mut self, var_name: &Var) -> Result<(), errors::ExecutionTimeError> {
+        // println!("refreshing dependents of {}", var_name);
+        if let Some(dependents) = self.until_dependencies_tracker.clone().get(var_name) {
+            for (dep_name, _) in dependents.iter() {
+                let dep_value: Value = self.look_up(dep_name)?;
+                let (dep_t, _): (Type, _) = dep_value.clone();
+
+                if let Some(until_conds) = dep_t.get_temporal().is_until {
+                    for until_cond in until_conds.strong.iter().chain(until_conds.weak.iter()) {
+                        let cond_texpr = self.udep_map.get(until_cond).unwrap().clone();
+                        let res = eval_expr(cond_texpr, self)?;
+                        if boolify(res) {
+                            self.destruct_value(dep_name.clone(), dep_value.clone())?
+                        }
                     }
                 }
             }
         }
         Ok(())
     }
+
+    pub fn age_values(
+        &mut self,
+        values: Vec<Value>,
+        name: String,
+    ) -> Result<(Option<Vec<Value>>, Vec<Var>), errors::ExecutionTimeError> {
+        let mut nexts: Vec<Var> = Vec::new();
+        let mut aged_values: Vec<Value> = Vec::new();
+        let mut aged_types: Vec<Type> = Vec::new();
+
+        for value in values.into_iter() {
+            let (t, te) = value.clone();
+            if let Some(aged_type) = types::advance_type(t.clone()) {
+                if !types::is_currently_available(&t.get_temporal())
+                    && types::is_currently_available(&aged_type.get_temporal())
+                {
+                    // NEXT -> CURRENT. no need to do CURRENT -> EXPIRED since expired doesn't affect until_conds, and current would've already.
+                    nexts.push(name.clone());
+                }
+                types::resolve_temporal_conflicts(aged_types.clone(), aged_type.clone(), false)?;
+                aged_types.push(aged_type.clone());
+                aged_values.push((aged_type, te));
+            } else {
+                self.destruct_value(name.clone(), value.clone())?;
+            }
+        }
+        if aged_values.is_empty() {
+            Ok((None, [].to_vec()))
+        } else {
+            Ok((Some(aged_values), nexts))
+        }
+    }
+
+    pub fn step_time(&mut self) -> Result<(), errors::ExecutionTimeError> {
+        self.clock += 1;
+
+        let mut all_nexts: Vec<Var> = Vec::new();
+        let context: Result<Vec<(Var, Option<Vec<Value>>)>, errors::ExecutionTimeError> = self
+            .vars
+            .clone()
+            .into_iter()
+            .map(|(name, values)| {
+                let (aged_value, mut nexts) = self.age_values(values, name.clone())?;
+                all_nexts.append(&mut nexts);
+                Ok((name, aged_value))
+            })
+            .collect();
+        self.vars = context?
+            .into_iter()
+            .filter_map(|(name, aged)| {
+                if let Some(aged) = aged {
+                    Some((name, aged))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // println!("context : {:?}", self);
+        for v in all_nexts.iter() {
+            self.refresh_dependents(v)?;
+        }
+        Ok(())
+    }
+
+    pub fn add_until_dependencies(
+        &mut self,
+        target: &Var,
+        until_dependencies: &types::UntilDependencies,
+    ) -> () {
+        let weak = HashSet::<_>::from_iter(
+            until_dependencies
+                .weak
+                .iter()
+                .map(|hash_val| self.udep_map.get(hash_val).unwrap())
+                .map(free_vars_of_texpr)
+                .flatten(),
+        );
+        let strong = HashSet::<_>::from_iter(
+            until_dependencies
+                .strong
+                .iter()
+                .map(|hash_val| self.udep_map.get(hash_val).unwrap())
+                .map(free_vars_of_texpr)
+                .flatten(),
+        );
+
+        // add to until_dependencies
+        for independent in weak.union(&strong) {
+            let dependents = self
+                .until_dependencies_tracker
+                .entry(independent.to_string())
+                .or_insert(HashMap::new());
+
+            if let Some(count) = dependents.clone().get(target) {
+                dependents.insert(target.clone(), count + 1);
+            } else {
+                dependents.insert(target.clone(), 1);
+            }
+        }
+    }
+
+    pub fn destruct_value(
+        &mut self,
+        var_name: Var,
+        value: Value,
+    ) -> Result<(), errors::ExecutionTimeError> {
+        println!("destructing {}", var_name);
+        let (t, _): (Type, _) = value.clone();
+
+        // handle the until_conditions if they're present
+        if let Some(until_conds) = t.get_temporal().is_until {
+            for strong in until_conds.strong.iter() {
+                let strong_cond_texpr = self.udep_map.get(strong).unwrap().clone();
+                let res = eval_expr(strong_cond_texpr, self)?;
+                if !(boolify(res)) {
+                    Err(errors::SUntilConditionUnsatisfied
+                        {message : format!("A StrongUntil condition was not satisfied by the time of the value's destruction.\n value = {:?}\n unsatisfied_condition = {:?}", value, strong)})?
+                }
+            }
+        }
+
+        // delete the value from `self`
+        let values: &mut Vec<Value> = self.vars.get_mut(&var_name).unwrap_or_else(|| panic!("Somehow, a `variable_name` experienced a destruction-attempt, but the `variable_name`={:?} didn't exist in VarContext...", var_name));
+        // remove once, thus `position` rather than `filter`
+        if let Some(pos) = values.clone().into_iter().position(|x| x == value) {
+            values.remove(pos);
+        } else {
+            println!("non-existent value {:?}", value);
+            println!("values of var {:?}", self.vars.get(&var_name).unwrap());
+            panic!("{}", format!("Somehow, a value experienced a destruction-attempt, but it didn't even exist under `variable_name`={:?}...", var_name));
+        }
+
+        self.until_dependencies_tracker = self
+            .until_dependencies_tracker
+            .clone()
+            .into_iter()
+            .map(|(indp_name, mut dependents)| {
+                if let Some(count) = dependents.remove(&var_name) {
+                    if count > 1 {
+                        dependents.insert(var_name.clone(), count - 1);
+                    }
+                    (indp_name, dependents)
+                } else {
+                    (indp_name, dependents)
+                }
+            })
+            .collect();
+        Ok(())
+    }
+
+    // checks and deletes values accordingly
+    pub fn detect_cycle_until_dep(&mut self, var_name: &Var) -> Result<(), errors::AssignError> {
+        if let Some(direct_dependents) = self.until_dependencies_tracker.get(var_name) {
+            let mut all_dependents: HashSet<String> = HashSet::new();
+            let mut stack = [direct_dependents].to_vec();
+
+            while stack.len() > 0 {
+                let dependents = stack.pop().unwrap();
+                for dep in dependents.iter().map(|(dep_name, _)| dep_name) {
+                    if !all_dependents.contains(dep) {
+                        all_dependents.insert(dep.clone());
+                        if let Some(grandchildren) = self.until_dependencies_tracker.get(dep) {
+                            stack.push(grandchildren);
+                        }
+                    }
+                }
+            }
+
+            if all_dependents.contains(var_name) {
+                Err(errors::CyclicalUntilDependency {message : format!("There is a cycle in the until_conditions. This cycle contains variable {:?}", var_name)})?
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
+    }
 }
 
-pub fn filter_value(v : Value, ctx : &mut VarContext) -> Result<Option<Value>, ExecutionTimeError> {
-    match v {
-        Value::Expression(_, _, ref until_dependencies) => {
-            let mut should_release = false;
-            for u_dependency in until_dependencies.weak.iter() {
-                match eval_expr(u_dependency.clone(), ctx, &mut None) {
-                    Ok(cond) => match cond {
-                        TypedExpr::TEConst(ast::Const::Bool(b), _) => {
-                            if b {
-                                should_release = true;
-                            }
-                        },
-                        _ => panic!("Type checking failed? Until_e2 did not evaluate to a boolean...")
-                    },
-                    Err(ExecutionTimeError::Name(_)) => {}, // all fine and dandy
-                    Err(e) => Err(e)?  // NameError is forgiveable, but any others are not.
-                };
-            }
-
-            let mut false_suntil_conds : Option<TypedExpr> = None;
-            let mut suntil_nameerror : Option<NameError> = None;
-            for u_dependency in until_dependencies.strong.iter() {
-                let res = eval_expr(u_dependency.clone(), ctx, &mut None);
-                match res {
-                    Ok(cond) => match cond {
-                        TypedExpr::TEConst(ast::Const::Bool(b), _) => {
-                            if b {
-                                should_release = true;
-                            } else {
-                                false_suntil_conds = Some(u_dependency.clone());
-                            }
-                        },
-                        _ => panic!("Type checking failed? Until_e2 did not evaluate to a boolean...")
-                    },
-                    Err(ExecutionTimeError::Name(NameError{message})) => {
-                        suntil_nameerror = Some(NameError{message});
-                    },
-                    Err(e) => Err(e)?  // NameError is forgiveable, but any others are not.
-                };
-            }
-
-            if should_release {
-                match suntil_nameerror {
-                    // `nameerror` means the condition is not true, which is bad for suntils.
-                    Some(NameError{message}) => Err(SUntilConditionUnsatisfied {message : format!("If a strong until condition is not evaluatable, then it's not true. Evaluation was stopped because of: \n{:?}", message).to_string()})?,
-                    None => {},
-                };
-                
-                if let Some(false_cond) = false_suntil_conds {
-                    Err(SUntilConditionUnsatisfied {message : format!("Condition {:?} was not true by the time of release.", false_cond).to_string()})?
-                } else {
-                    Ok(None)
-                }
-            } else {
-                Ok(Some(v))
-            }
+pub fn boolify(texpr: TypedExpr) -> bool {
+    match texpr {
+        TypedExpr::TEConst(c, _) => match c {
+            ast::Const::Bool(b) => b,
+            ast::Const::Number(_) => panic!("Truthy-falsey not implemented yet for integers."),
         },
-        Value::Union(v1, v2) => {
-            if let Some(v1) = filter_value(*v1, ctx)? {
-                if let Some(v2) = filter_value(*v2, ctx)? {
-                    Ok(Some(Value::Union(Box::new(v1), Box::new(v2))))
-                } else {
-                    Ok(Some(v1))
-                }
-            } else {
-                if let Some(v2) = filter_value(*v2, ctx)? {
-                    Ok(Some(v2))
-                } else {
-                    Ok(None)
-                }
-            }
-        }
+        _ => panic!("Truthy-falsey not implemented yet for non-constants."),
     }
 }
 
-pub fn get_most_immediate_val(v: &Value) -> &Value {
-    match v {
-        Value::Expression(_, _, _) => v,
-        Value::Union(v1, v2) => {
-            let immediate_v1 = get_most_immediate_val(v1);
-            let immediate_v2 = get_most_immediate_val(v2);
-            
-            let (ty1, ty2) = match (immediate_v1.clone(), immediate_v2.clone()) {
-                (Value::Expression(ty1, _, _), Value::Expression(ty2, _, _)) => (ty1, ty2),
-                _ => panic!("get_most_immediate_val should only return Value::Expression, but it didn't..?")
-            };
-            match (ty1, ty2) {
-                (Type::Prod(TemporalType::Current, _), Type::Prod(_, _)) => immediate_v1,
-                (Type::Prod(_, _), Type::Prod(TemporalType::Current, _)) => immediate_v2,
-                (Type::Prod(TemporalType::Global, _), Type::Prod(_, _)) => immediate_v1,
-                (Type::Prod(_, _), Type::Prod(TemporalType::Global, _)) => immediate_v2,
-                (Type::Prod(TemporalType::Next, _), Type::Prod(_, _)) => immediate_v2,
-                (Type::Prod(_, _), Type::Prod(TemporalType::Next, _)) => immediate_v1,
-                _ => panic!("There is no way to decide which is more pressing between {:?} and {:?}.", immediate_v1, immediate_v2)
-            }
-        }
+pub fn get_most_immediate_value(values: Vec<Value>) -> Option<Value> {
+    use types::TemporalAvailability;
+
+    println!("\nmost_immediate:\n{:?}\n", values);
+    let most_immediate =
+        values
+            .into_iter()
+            .max_by_key(|(t, _)| match t.get_temporal().when_available {
+                TemporalAvailability::Current => 1,
+                TemporalAvailability::Next => -1,
+                TemporalAvailability::Future => 0,
+                TemporalAvailability::Undefined => {
+                    panic!("The immediacy of `undefined` is meaningless.")
+                }
+            })?;
+
+    if most_immediate.0.get_temporal().when_available == TemporalAvailability::Next {
+        return None;
+    } else {
+        Some(most_immediate)
     }
 }
 
-pub fn free_vars_of_texpr(e : TypedExpr) -> ast::FreeVars {
+pub fn free_vars_of_texpr(e: &TypedExpr) -> ast::FreeVars {
     match e {
         TypedExpr::TEConst(_, _) => ast::FreeVars::new(),
         TypedExpr::TEVar(v, _) => {
             let mut free_vars = ast::FreeVars::new();
-            free_vars.insert(v);
+            free_vars.insert(v.to_string());
             free_vars
-        },
-        TypedExpr::TEBinop(_, e1, e2, _) => {
-            free_vars_of_texpr(*e1).union(&free_vars_of_texpr(*e2)).cloned().collect()
-        },
-        TypedExpr::TEUnop(_, e1, _) => {
-            free_vars_of_texpr(*e1)
-        },
+        }
+        TypedExpr::TEBinop(_, e1, e2, _) => free_vars_of_texpr(&*e1)
+            .union(&free_vars_of_texpr(&*e2))
+            .cloned()
+            .collect(),
+        TypedExpr::TEUnop(_, e1, _) => free_vars_of_texpr(&*e1),
         TypedExpr::TInput(_) => ast::FreeVars::new(),
     }
 }
 
-pub fn type_of_constant(c : ast::Const) -> types::Type {
+pub fn type_of_constant(c: ast::Const) -> types::Type {
+    let temporal_undefined = TemporalType {
+        when_available: types::TemporalAvailability::Undefined,
+        when_dissipates: types::TemporalPersistency::Undefined,
+        is_until: None,
+    };
+
     match c {
-        ast::Const::Number(_) => types::Type::Prod(types::TemporalType::Current, types::SimpleType::Int),
-        ast::Const::Bool(_) => types::Type::Prod(types::TemporalType::Current, types::SimpleType::Bool)
+        ast::Const::Number(_) => types::Type(temporal_undefined, types::SimpleType::Int),
+        ast::Const::Bool(_) => types::Type(temporal_undefined, types::SimpleType::Bool),
     }
 }
 
-pub fn eval_expr(e : TypedExpr, ctx : &mut VarContext, until_tracker_opt : &mut Option<&mut UntilLog>) -> Result<TypedExpr, ExecutionTimeError> {
+pub fn eval_expr(
+    e: TypedExpr,
+    ctx: &mut VarContext,
+) -> Result<TypedExpr, errors::ExecutionTimeError> {
     match e {
         TypedExpr::TEConst(_, _) => Ok(e),
         TypedExpr::TEVar(var_name, _) => {
-            match ctx.look_up(&var_name)? {
-                Value::Expression(_, texpr, _) => {
-                    let mut ty = typecheck::type_of_typedexpr(&texpr);
-                    if types::is_currently_available(&ty.get_temporal()) {
-                        Ok(texpr)
-                    } else {
-                        Err(CurrentlyUnavailableError{message : format!("You tried access a value that's only available in the next timestep... Temporal Type was {:?}", ty).to_string()})?
-                    }
-                },
-                _ => panic!("VarContext.look_up should only return `Value::Expression`, but it didn't? `get_most_immediate_val` may have failed. May be something else.")
+            let (ty, texpr) = ctx.look_up(&var_name)?;
+            if types::is_currently_available(&ty.get_temporal()) {
+                Ok(texpr)
+            } else {
+                Err(errors::CurrentlyUnavailableError{message : format!("You tried access a value that's only available in the next timestep... Temporal Type was {:?}", ty).to_string()})?
             }
-        },
+        }
         TypedExpr::TEBinop(b, e1, e2, _) => {
-            use ast::Const;
             use ast::Binop;
+            use ast::Const;
 
-            let e1 = eval_expr(*e1, ctx, until_tracker_opt)?;
-            let e2 = eval_expr(*e2, ctx, until_tracker_opt)?;
-            let (c1, c2) = match (e1, e2.clone()) {
+            // only desiring constants is gucci since we're only using FOL. Thus, we can't have "propositions as values."
+            // Sure, propositions are expressions, but stuff like returning a proposition?
+            // `f(x) = x > .3 & g` is illegal if `g : proposition`
+            let (c1, c2) = match (eval_expr(*e1, ctx)?, eval_expr(*e2, ctx)?) {
                 (TypedExpr::TEConst(c1, _), TypedExpr::TEConst(c2, _)) => (c1, c2),
-                _ => panic!("Did not receive a constant after evaluation.")
+                _ => panic!("Did not receive a constant after evaluation."),
             };
-            
+
             match b {
                 Binop::Plus => match (c1, c2) {
                     (Const::Number(n1), Const::Number(n2)) => {
                         let constant = Const::Number(n1 + n2);
-                        Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
-                    },
-                    _ => panic!("Type-checking failed??")
+                        Ok(TypedExpr::TEConst(
+                            constant.clone(),
+                            type_of_constant(constant),
+                        ))
+                    }
+                    _ => panic!("Type-checking failed??"),
                 },
                 Binop::Minus => match (c1, c2) {
                     (Const::Number(n1), Const::Number(n2)) => {
                         let constant = Const::Number(n1 - n2);
-                        Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
-                    },
-                    _ => panic!("Type-checking failed??")
+                        Ok(TypedExpr::TEConst(
+                            constant.clone(),
+                            type_of_constant(constant),
+                        ))
+                    }
+                    _ => panic!("Type-checking failed??"),
                 },
                 Binop::Times => match (c1, c2) {
                     (Const::Number(n1), Const::Number(n2)) => {
                         let constant = Const::Number(n1 * n2);
-                        Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
-                    },
-                    _ => panic!("Type-checking failed??")
+                        Ok(TypedExpr::TEConst(
+                            constant.clone(),
+                            type_of_constant(constant),
+                        ))
+                    }
+                    _ => panic!("Type-checking failed??"),
                 },
                 Binop::Div => match (c1, c2) {
                     (Const::Number(n1), Const::Number(n2)) => {
                         let constant = Const::Number((n1 / n2) as i64);
-                        Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
-                    },
-                    _ => panic!("Type-checking failed??")
+                        Ok(TypedExpr::TEConst(
+                            constant.clone(),
+                            type_of_constant(constant),
+                        ))
+                    }
+                    _ => panic!("Type-checking failed??"),
                 },
                 Binop::Or => match (c1, c2) {
                     (Const::Bool(b1), Const::Bool(b2)) => {
                         let constant = Const::Bool(b1 || b2);
-                        Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
-                    },
-                    _ => panic!("Type-checking failed??")
+                        Ok(TypedExpr::TEConst(
+                            constant.clone(),
+                            type_of_constant(constant),
+                        ))
+                    }
+                    _ => panic!("Type-checking failed??"),
                 },
                 Binop::And => match (c1, c2) {
                     (Const::Bool(b1), Const::Bool(b2)) => {
                         let constant = Const::Bool(b1 && b2);
-                        Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
-                    },
-                    _ => panic!("Type-checking failed??")
+                        Ok(TypedExpr::TEConst(
+                            constant.clone(),
+                            type_of_constant(constant),
+                        ))
+                    }
+                    _ => panic!("Type-checking failed??"),
                 },
                 Binop::Until => match (c1.clone(), c2) {
                     (_, Const::Bool(cond)) => {
                         if cond {
-                            Err(UntilVoidError{message : "Until's condition is true by the time of evaluation".to_string()})?
+                            Err(errors::UntilVoidError {
+                                message: "Until's condition is true by the time of evaluation"
+                                    .to_string(),
+                            })?
                         } else {
-                            if let Some(&mut ref mut until_tracker) = until_tracker_opt {
-                                until_tracker.weak.push(e2);
-                            }
                             let constant = c1;
-                            Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
+                            Ok(TypedExpr::TEConst(
+                                constant.clone(),
+                                type_of_constant(constant),
+                            ))
                         }
                     }
-                    _ => panic!("Not Implemented")
+                    _ => panic!("Not Implemented"),
                 },
                 Binop::SUntil => match (c1.clone(), c2) {
                     (_, Const::Bool(cond)) => {
                         if cond {
-                            Err(UntilVoidError{message : "Until's condition is true by the time of evaluation".to_string()})?
+                            Err(errors::UntilVoidError {
+                                message: "Until's condition is true by the time of evaluation"
+                                    .to_string(),
+                            })?
                         } else {
-                            if let Some(until_tracker) = until_tracker_opt {
-                                until_tracker.strong.push(e2);
-                            }
                             let constant = c1;
-                            Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
+                            Ok(TypedExpr::TEConst(
+                                constant.clone(),
+                                type_of_constant(constant),
+                            ))
                         }
                     }
-                    _ => panic!("Not Implemented")
+                    _ => panic!("Not Implemented"),
                 },
             }
-        },
+        }
         TypedExpr::TEUnop(u, e1, _) => {
             use ast::Const;
             use ast::Unop;
 
-            let e1 = eval_expr(*e1, ctx, until_tracker_opt)?;
-            let c = match e1 {
+            let c = match eval_expr(*e1, ctx)? {
                 TypedExpr::TEConst(c, _) => c,
                 // todo: untils are later
-                _ => panic!("Did not receive a constant after evaluation.")
+                _ => panic!("Did not receive a constant after evaluation."),
             };
-            
+
             let constant = match u {
-                Unop::Neg => {
-                    match c {
-                        Const::Bool(_) => panic!("Type-checking failed??"),
-                        Const::Number(n) => Const::Number(-n)
-                    }
+                Unop::Neg => match c {
+                    Const::Bool(_) => panic!("Type-checking failed??"),
+                    Const::Number(n) => Const::Number(-n),
                 },
-                Unop::Not => {
-                    match c {
-                        Const::Bool(b) => Const::Bool(!b),
-                        Const::Number(_) => panic!("Type-checking failed??")
-                    }
-                }
+                Unop::Not => match c {
+                    Const::Bool(b) => Const::Bool(!b),
+                    Const::Number(_) => panic!("Type-checking failed??"),
+                },
             };
-            Ok(TypedExpr::TEConst(constant.clone(), type_of_constant(constant)))
-        },
+            Ok(TypedExpr::TEConst(
+                constant.clone(),
+                type_of_constant(constant),
+            ))
+        }
         TypedExpr::TInput(t) => {
             let mut buffer = String::new();
-            std::io::stdin().read_line(&mut buffer).expect("Failed to read line.");
+            std::io::stdin()
+                .read_line(&mut buffer)
+                .expect("Failed to read line.");
             if let Ok(n) = buffer.trim().parse() {
                 Ok(TypedExpr::TEConst(ast::Const::Number(n), t))
             } else {
-                Err(InputError{message : "Input is not an integer!".to_string()})?
+                Err(errors::InputError {
+                    message: "Input is not an integer!".to_string(),
+                })?
             }
-        },
+        }
     }
 }
 
-// `false` if worked. `true` if error
-pub fn exec_command(c : TypedCommand, ctx : &mut VarContext) -> Result<(), ExecutionTimeError> {
-    let mut until_tracker = UntilLog {strong : Vec::new(), weak : Vec::new()};
+pub fn exec_command(
+    c: TypedCommand,
+    ctx: &mut VarContext,
+) -> Result<(), errors::ExecutionTimeError> {
     match c {
         TypedCommand::TGlobal(v, texpr) => {
-            let val = eval_expr(texpr, ctx, &mut Some(&mut until_tracker))?;
-            ctx.add_var(&v, &val, &Type::Prod(TemporalType::Global, SimpleType::Undefined), &until_tracker);
-            ctx.add_until_dependencies(&v, &until_tracker);
-            ctx.check_until_dependencies(&v)?;
+            let val = eval_expr(texpr.clone(), ctx)?;
+            ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
-        },
+        }
         TypedCommand::TNext(v, texpr) => {
-            let val = eval_expr(texpr, ctx, &mut Some(&mut until_tracker))?;
-            ctx.add_var(&v, &val, &Type::Prod(TemporalType::Next, SimpleType::Undefined), &until_tracker);
-            ctx.add_until_dependencies(&v, &until_tracker);
-            ctx.check_until_dependencies(&v)?;
+            let val = eval_expr(texpr.clone(), ctx)?;
+            ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
-        },
+        }
         TypedCommand::TUpdate(v, texpr) => {
-            let val = eval_expr(texpr, ctx, &mut Some(&mut until_tracker))?;
-            ctx.add_var(&v, &val, &Type::TempNest(TemporalType::Next, Box::new(Type::Prod(TemporalType::Future, SimpleType::Undefined))), &until_tracker);
-            ctx.add_until_dependencies(&v, &until_tracker);
-            ctx.check_until_dependencies(&v)?;
+            let val = eval_expr(texpr.clone(), ctx)?;
+            ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
-        },
+        }
         TypedCommand::TFinally(v, texpr) => {
-            let val = eval_expr(texpr, ctx, &mut Some(&mut until_tracker))?;
-            ctx.add_var(&v, &val, &Type::TempNest(TemporalType::Global, Box::new(Type::Prod(TemporalType::Future, SimpleType::Undefined))), &until_tracker);
-            ctx.add_until_dependencies(&v, &until_tracker);
-            ctx.check_until_dependencies(&v)?;
+            let val = eval_expr(texpr.clone(), ctx)?;
+            ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
-        },
+        }
         TypedCommand::TPrint(texpr) => {
             // todo: handle pdfs and propositions when implemented
-            let c = match eval_expr(texpr, ctx, &mut None)? {
+            let c = match eval_expr(texpr, ctx)? {
                 TypedExpr::TEConst(c, _) => c,
-                _ => panic!("Evaluation did not result in a constant.")
+                _ => panic!("Evaluation did not result in a constant."),
             };
             match c {
-                ast::Const::Bool(b) => println!("{}", b),
-                ast::Const::Number(n) => println!("{}", n)
+                ast::Const::Bool(b) => println!("Print => {}", b),
+                ast::Const::Number(n) => println!("Print => {}", n),
             };
             Ok(())
-        },
+        }
     }
 }
 
-pub fn exec_time_block(time_block : ast::TypedTimeBlock, ctx : &mut VarContext) -> Result<(), ExecutionTimeError> {
-    time_block.iter().try_for_each(|cmd| exec_command(cmd.clone(), ctx))
+pub fn exec_time_block(
+    time_block: ast::TypedTimeBlock,
+    ctx: &mut VarContext,
+) -> Result<(), errors::ExecutionTimeError> {
+    println!("--------");
+    time_block
+        .iter()
+        .try_for_each(|cmd| exec_command(cmd.clone(), ctx))
 }
 
-pub fn exec_program(pgrm : ast::TypedProgram) -> Result<(), ExecutionTimeError> {
+// todo: consider optimizing `udep_map` with reference counting.
+pub fn exec_program(pgrm: ast::TypedProgram) -> Result<(), errors::ExecutionTimeError> {
     let mut ctx = VarContext {
-        vars : HashMap::new(),
-        until_dependencies : HashMap::new(),
-        clock : 0
+        vars: HashMap::new(),
+        until_dependencies_tracker: HashMap::new(),
+        udep_map: pgrm.udep_map,
+        clock: 0,
     };
 
-    pgrm.iter().try_for_each(|tb| exec_time_block(tb.clone(), &mut ctx))
+    pgrm.code.iter().try_for_each(|tb| {
+        ctx.step_time()?;
+        exec_time_block(tb.clone(), &mut ctx)
+    })?;
+
+    for (name, values) in ctx.clone().vars.into_iter() {
+        for value in values.into_iter() {
+            ctx.destruct_value(name.clone(), value)?;
+        }
+    }
+
+    Ok(())
 }
