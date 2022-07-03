@@ -22,6 +22,7 @@ pub enum Token {
     Op(String),
     Number(String),
     Var(String),
+    COMMENT,
 }
 
 impl fmt::Display for Token {
@@ -42,6 +43,7 @@ impl fmt::Display for Token {
             Token::Var(s) => write!(f, "Var {}", s),
             Token::LPAREN => write!(f, "("),
             Token::RPAREN => write!(f, ")"),
+            Token::COMMENT => write!(f, "# COMMENT"),
         }
     }
 }
@@ -83,18 +85,19 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
 
     let punctuation = just("(").to(Token::LPAREN).or(just(")").to(Token::RPAREN));
 
+    let comment = just::<_, _, Simple<char>>("//")
+        .then(take_until(text::newline().or(end().rewind())))
+        .ignored()
+        .to(Token::COMMENT);
+
     let token = num
         .or(num)
+        .or(comment)
         .or(multiop)
         .or(op)
         .or(ident)
         .or(punctuation)
         .recover_with(skip_then_retry_until([]));
-
-    // let comment = just("//").then(take_until(just('\n'))).padded();
-    let comment = just("#")
-        .then_ignore(take_until(end().or(just("\n").ignored())))
-        .padded();
 
     let whitespace = just(" ").or(just("\t"));
 
@@ -106,7 +109,8 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
 
     token
         .map_with_span(|tok, span| (tok, span))
-        .padded_by(comment.repeated())
+        // .padded_by(comment.repeated())
         .padded_by(whitespace.repeated())
         .repeated()
+        .then_ignore(end())
 }

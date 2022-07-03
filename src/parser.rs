@@ -74,14 +74,14 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
             )
             .foldl(|lhs, (op, rhs)| Expr::EBinop(op, Box::new(lhs), Box::new(rhs)));
 
-        until
+        until.labelled("expr")
     })
 }
 
 pub fn parser() -> impl Parser<lexer::Token, ast::Program, Error = Simple<lexer::Token>> + Clone {
     use lexer::Token;
 
-    let cmd = recursive(|_| {
+    let prog = recursive(|_| {
         use ast::Command;
         let ident = select! { Token::Var(ident) => ident.clone() };
 
@@ -116,7 +116,7 @@ pub fn parser() -> impl Parser<lexer::Token, ast::Program, Error = Simple<lexer:
             .then(expr_parser())
             .map(|(_, e)| ast::Command::Print(e));
 
-        let newline = just(Token::NEWLINE);
+        let newline = just(Token::NEWLINE).or(just(Token::COMMENT));
 
         let statement = timestep
             .clone()
@@ -126,7 +126,11 @@ pub fn parser() -> impl Parser<lexer::Token, ast::Program, Error = Simple<lexer:
             .or(finally.clone())
             .or(print.clone());
 
-        statement.separated_by(newline.repeated().at_least(1))
+        newline
+            .clone()
+            .repeated()
+            .ignore_then(statement.separated_by(newline.clone().repeated().at_least(1)))
+            .then_ignore(newline.repeated())
     });
-    cmd.then_ignore(end())
+    prog.then_ignore(end())
 }

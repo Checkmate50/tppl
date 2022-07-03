@@ -74,6 +74,7 @@ pub type DefVars = HashSet<Var>;
 
 pub type TypedTimeBlock = Vec<TypedCommand>;
 
+#[derive(Clone, Debug)]
 pub struct TypedProgram {
     pub code: Vec<TypedTimeBlock>,
     pub udep_map: HashMap<u64, TypedExpr>,

@@ -13,21 +13,33 @@ fn main() {
     let src = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))
         .expect("failed to read file")
         .replace("\r\n", "\n");
-    let (tokens, errs) = lexer::lexer().parse_recovery(src.as_str());
+    let (tokens, lex_errs) = lexer::lexer().parse_recovery(src.as_str());
 
-    if errs.len() > 0 {
-        println!("lexer errors {:?}", errs);
+    if lex_errs.len() > 0 {
+        println!("lexer errors {:?}", lex_errs);
     } else {
         let parse_errs = if let Some(tokens) = tokens {
+            // // stripped out tokens
+            // let tokens: Vec<(_, _)> = tokens
+            //     .into_iter()
+            //     .filter(|tok| match tok {
+            //         (lexer::Token::COMMENT, _) => false,
+            //         _ => true,
+            //     })
+            //     .collect();
             let len = src.chars().count();
             let (prog, parse_errs) = parser::parser()
                 .parse_recovery(Stream::from_iter(len..len + 1, tokens.into_iter()));
-            if let Some(funcs) = prog.clone().filter(|_| errs.len() + parse_errs.len() == 0) {
+            if let Some(funcs) = prog
+                .clone()
+                .filter(|_| lex_errs.len() + parse_errs.len() == 0)
+            {
                 println!("{}", ast_printer::string_of_program(funcs));
 
                 let program_result = match typecheck::infer_program(prog.unwrap()) {
-                    Ok(ty_prog) => match interpreter::exec_program(ty_prog) {
+                    Ok(ty_prog) => match interpreter::exec_program(ty_prog.clone()) {
                         Ok(_) => {
+                            println!("{:?}", ty_prog);
                             println!("Executed");
                             Ok(())
                         }
