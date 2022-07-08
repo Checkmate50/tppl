@@ -12,6 +12,18 @@ pub struct CyclicalUntilDependency {
     pub message: String,
 }
 #[derive(Debug)]
+pub struct NoPredicateError {
+    pub message: String,
+}
+#[derive(Debug)]
+pub struct MultiplePredicateError {
+    pub message: String,
+}
+#[derive(Debug)]
+pub struct ImproperCallError {
+    pub message: String,
+}
+#[derive(Debug)]
 pub struct InferError {
     pub message: String,
 }
@@ -21,6 +33,10 @@ pub struct ConstrainError {
 }
 #[derive(Debug)]
 pub struct TemporalConflictError {
+    pub message: String,
+}
+#[derive(Debug)]
+pub struct SimpleConflictError {
     pub message: String,
 }
 #[derive(Debug)]
@@ -61,11 +77,18 @@ pub struct SUntilConditionUnsatisfied {
 pub enum ExecutionTimeError {
     // Should I put `Name`, `Input`, `Until`, `SUntil`, and `Immediate` in some new `AccessError`?
     Type(TypeError),
+    Predicate(PredError),
     Assign(AssignError),
     Name(NameError),
     Input(InputError),
     Until(UntilVoidError),
     SUntil(SUntilConditionUnsatisfied),
+}
+#[derive(Debug)]
+pub enum PredError {
+    Zero(NoPredicateError),
+    Mult(MultiplePredicateError),
+    Call(ImproperCallError),
 }
 #[derive(Debug)]
 pub enum Error {
@@ -77,7 +100,8 @@ pub enum TypeError {
     Infer(InferError),
     Constrain(ConstrainError),
     Immediacy(CurrentlyUnavailableError),
-    Conflict(TemporalConflictError),
+    TempConflict(TemporalConflictError),
+    SimplConflict(SimpleConflictError),
 }
 #[derive(Debug)]
 pub enum AssignError {
@@ -189,21 +213,66 @@ impl From<CurrentlyUnavailableError> for ExecutionTimeError {
 }
 impl From<TemporalConflictError> for TypeError {
     fn from(e: TemporalConflictError) -> Self {
-        TypeError::Conflict(e)
+        TypeError::TempConflict(e)
     }
 }
 impl From<TemporalConflictError> for CompileTimeError {
     fn from(e: TemporalConflictError) -> Self {
-        CompileTimeError::Type(TypeError::Conflict(e))
+        CompileTimeError::Type(TypeError::TempConflict(e))
     }
 }
 impl From<TemporalConflictError> for ExecutionTimeError {
     fn from(e: TemporalConflictError) -> Self {
-        ExecutionTimeError::Type(TypeError::Conflict(e))
+        ExecutionTimeError::Type(TypeError::TempConflict(e))
     }
 }
 impl From<CyclicalUntilDependency> for AssignError {
     fn from(e: CyclicalUntilDependency) -> Self {
         AssignError::Cyclical(e)
+    }
+}
+impl From<SimpleConflictError> for TypeError {
+    fn from(e: SimpleConflictError) -> Self {
+        TypeError::SimplConflict(e)
+    }
+}
+impl From<SimpleConflictError> for CompileTimeError {
+    fn from(e: SimpleConflictError) -> Self {
+        CompileTimeError::Type(TypeError::SimplConflict(e))
+    }
+}
+impl From<SimpleConflictError> for ExecutionTimeError {
+    fn from(e: SimpleConflictError) -> Self {
+        ExecutionTimeError::Type(TypeError::SimplConflict(e))
+    }
+}
+impl From<NoPredicateError> for PredError {
+    fn from(e: NoPredicateError) -> Self {
+        PredError::Zero(e)
+    }
+}
+impl From<NoPredicateError> for ExecutionTimeError {
+    fn from(e: NoPredicateError) -> Self {
+        ExecutionTimeError::Predicate(PredError::Zero(e))
+    }
+}
+impl From<MultiplePredicateError> for PredError {
+    fn from(e: MultiplePredicateError) -> Self {
+        PredError::Mult(e)
+    }
+}
+impl From<MultiplePredicateError> for ExecutionTimeError {
+    fn from(e: MultiplePredicateError) -> Self {
+        ExecutionTimeError::Predicate(PredError::Mult(e))
+    }
+}
+impl From<ImproperCallError> for PredError {
+    fn from(e: ImproperCallError) -> Self {
+        PredError::Call(e)
+    }
+}
+impl From<ImproperCallError> for ExecutionTimeError {
+    fn from(e: ImproperCallError) -> Self {
+        ExecutionTimeError::Predicate(PredError::Call(e))
     }
 }

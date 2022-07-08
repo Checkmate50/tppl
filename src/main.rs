@@ -11,22 +11,13 @@ pub mod types;
 
 fn main() {
     let src = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))
-        .expect("failed to read file")
-        .replace("\r\n", "\n");
+        .expect("failed to read file");
     let (tokens, lex_errs) = lexer::lexer().parse_recovery(src.as_str());
 
     if lex_errs.len() > 0 {
         println!("lexer errors {:?}", lex_errs);
     } else {
         let parse_errs = if let Some(tokens) = tokens {
-            // // stripped out tokens
-            // let tokens: Vec<(_, _)> = tokens
-            //     .into_iter()
-            //     .filter(|tok| match tok {
-            //         (lexer::Token::COMMENT, _) => false,
-            //         _ => true,
-            //     })
-            //     .collect();
             let len = src.chars().count();
             let (prog, parse_errs) = parser::parser()
                 .parse_recovery(Stream::from_iter(len..len + 1, tokens.into_iter()));

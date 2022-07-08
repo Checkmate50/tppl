@@ -1,13 +1,30 @@
 use crate::errors;
 
-
 #[derive(Clone, PartialEq, Hash, Debug)]
 pub enum SimpleType {
     Bool,
     // Float,
     Int,
-    // Pdf
-    Undefined
+    // Pdf,
+    Predicate(Vec<Box<SimpleType>>, Box<SimpleType>),
+    Option(Box<SimpleType>),
+    Undefined,
+}
+
+impl SimpleType {
+    pub fn is_predicate(&self) -> bool {
+        match self {
+            SimpleType::Predicate(_, _) => true,
+            _ => false,
+        }
+    }
+    // excludes PDFs
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            SimpleType::Int => true,
+            _ => false,
+        }
+    }
 }
 
 // the deepest temporal type would be `Global(Future(Until))`. Note that `Until(Until)` should be simplified to `Until`
@@ -30,18 +47,21 @@ pub enum TemporalAvailability {
     Current,
     Next,
     Future,
-    Undefined
+    Undefined,
 }
 #[derive(Clone, PartialEq, Hash, Debug)]
 pub enum TemporalPersistency {
     Fleeting,
     Lingering,
     Always,
-    Undefined
+    Undefined,
 }
 
 #[derive(Clone, PartialEq, Hash, Debug)]
-pub struct UntilDependencies {pub weak : Vec<u64>, pub strong : Vec<u64>}
+pub struct UntilDependencies {
+    pub weak: Vec<u64>,
+    pub strong: Vec<u64>,
+}
 
 impl UntilDependencies {
     pub fn is_empty(&mut self) -> bool {
@@ -75,60 +95,41 @@ pub fn is_currently_available(ty: &TemporalType) -> bool {
         TemporalAvailability::Current => true,
         TemporalAvailability::Next => false,
         TemporalAvailability::Future => true,
-        TemporalAvailability::Undefined => panic!("The immediacy of `undefined` is meaningless.")
+        TemporalAvailability::Undefined => panic!("The immediacy of `undefined` is meaningless."),
     }
 }
 
-pub fn advance_type(t: Type) -> Option<Type> {
-    let temp = t.get_temporal();
-    let simpl = t.get_simpl();
-
+pub fn advance_type(temp: TemporalType) -> Option<TemporalType> {
     match temp.when_dissipates {
         TemporalPersistency::Fleeting => {
             match temp.when_available {
                 TemporalAvailability::Current => None,
                 TemporalAvailability::Next => {
                     if temp.is_until.is_some() {
-                        Some(Type(
+                        Some(
                             TemporalType {
                                 when_available : TemporalAvailability::Current,
                                 when_dissipates : TemporalPersistency::Lingering,
                                 is_until : temp.is_until
-                            }, simpl
-                        ))
+                            }
+                        )
                     } else {
-                        Some(Type(
+                        Some(
                             TemporalType {
                                 when_available : TemporalAvailability::Current,
                                 when_dissipates : TemporalPersistency::Fleeting,
                                 is_until : None
-                            }, simpl
-                        ))
-                    }    
+                            }
+                        )
+                    }
                 },
                 TemporalAvailability::Future => panic!("While `future` should be advanced to `future` (since finally), but it should be impossible for there to be a non-always future. `Future` should only occur with `Global(Future[Until])`."),
                 TemporalAvailability::Undefined => panic!("The immediacy of `undefined` is meaningless.")
             }
         }
-        TemporalPersistency::Lingering => Some(t),
-        TemporalPersistency::Always => Some(t),
+        TemporalPersistency::Lingering => Some(temp),
+        TemporalPersistency::Always => Some(temp),
         TemporalPersistency::Undefined => panic!("The persistency of `undefined` is meaningless.")
-    }
-}
-
-pub fn get_most_immediate_type(types: Vec<Type>) -> Option<Type> {
-    let most_immediate = types.into_iter().max_by_key(|t| match t.get_temporal().when_available {
-            TemporalAvailability::Current => 1,
-            TemporalAvailability::Next => -1,
-            TemporalAvailability::Future => 0,
-            TemporalAvailability::Undefined => panic!("The immediacy of `undefined` is meaningless.")
-        }
-    )?;
-
-    if most_immediate.get_temporal().when_available == TemporalAvailability::Next {
-        return None
-    } else {
-        Some(most_immediate)
     }
 }
 
@@ -137,28 +138,42 @@ pub fn get_most_immediate_type(types: Vec<Type>) -> Option<Type> {
 // Global(Future(Until)), Next(Future(Until))
 // ~~~Current(Until)~~~
 
-pub fn resolve_temporal_conflicts(mut types: Vec<Type>, candidate: Type, forgive_until : bool) -> Result<Vec<Type>, errors::TemporalConflictError> {
-    if types.len() > 0 {
-        let mut resolved = Vec::new();
+pub fn resolve_temporal_conflicts(
+    temps: Vec<TemporalType>,
+    candidate: TemporalType,
+    forgive_until: bool,
+) -> Result<Vec<TemporalType>, errors::TemporalConflictError> {
+    let mut resolved = Vec::new();
+    let mut temps = temps.clone();
 
-        while !types.is_empty() {
-            let ty = types.pop().unwrap();
+    while !temps.is_empty() {
+        let temp = temps.pop().unwrap();
 
-            if ty.get_temporal().when_available == candidate.get_temporal().when_available {
-                if forgive_until {
-                    if ty.get_temporal().is_until.is_none() {
-                        Err(errors::TemporalConflictError { message : format!("Conflicting types {:?} and {:?}", ty, candidate).to_string()})?
-                    }
-                } else {
-                    Err(errors::TemporalConflictError { message : format!("Conflicting types {:?} and {:?}", ty, candidate).to_string()})?
-                }
-            } else {
-                resolved.push(ty.clone());
+        if temp.when_available == candidate.when_available {
+            if !forgive_until || temp.is_until.is_none() {
+                Err(errors::TemporalConflictError {
+                    message: format!("Conflicting types {:?} and {:?}", temp, candidate)
+                        .to_string(),
+                })?
             }
+        } else {
+            resolved.push(temp);
         }
-        resolved.push(candidate);
-        Ok(resolved)
-    } else {
-        Ok([candidate].to_vec())
+    }
+    resolved.push(candidate);
+    Ok(resolved)
+}
+
+pub fn resolve_simple_conflicts(
+    a: SimpleType,
+    b: SimpleType,
+) -> Result<SimpleType, errors::SimpleConflictError> {
+    match (a.clone(), b.clone()) {
+        (_, SimpleType::Undefined) => Ok(a),
+        (SimpleType::Undefined, _) => Ok(b),
+        (a, b) if a == b => Ok(a),
+        _ => Err(errors::SimpleConflictError {
+            message: format!("").to_string(),
+        })?,
     }
 }

@@ -23,6 +23,7 @@ pub enum Token {
     Number(String),
     Var(String),
     COMMENT,
+    COMMA,
 }
 
 impl fmt::Display for Token {
@@ -44,6 +45,7 @@ impl fmt::Display for Token {
             Token::LPAREN => write!(f, "("),
             Token::RPAREN => write!(f, ")"),
             Token::COMMENT => write!(f, "# COMMENT"),
+            Token::COMMA => write!(f, ","),
         }
     }
 }
@@ -58,6 +60,7 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
 
     // Before the op set for THREEDASH
     let multiop = just("\n")
+        .or(just("\r\n"))
         .to(Token::NEWLINE)
         .or(just("---").to(Token::THREEDASH))
         .or(just("==").to(Token::Op("==".to_owned())))
@@ -83,7 +86,11 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
         _ => Token::Var(ident),
     });
 
-    let punctuation = just("(").to(Token::LPAREN).or(just(")").to(Token::RPAREN));
+    let punctuation = choice((
+        just(",").to(Token::COMMA),
+        just("(").to(Token::LPAREN),
+        just(")").to(Token::RPAREN),
+    ));
 
     let comment = just::<_, _, Simple<char>>("//")
         .then(take_until(text::newline().or(end().rewind())))
@@ -100,12 +107,6 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
         .recover_with(skip_then_retry_until([]));
 
     let whitespace = just(" ").or(just("\t"));
-
-    // token
-    //     .map_with_span(|tok, span| (tok, span))
-    //     .padded_by(comment.repeated())
-    //     .padded_by(whitespace.repeated())
-    //     .repeated()
 
     token
         .map_with_span(|tok, span| (tok, span))

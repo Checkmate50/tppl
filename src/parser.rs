@@ -11,12 +11,22 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
             Token::TRUE => Expr::EConst(ast::Const::Bool(true)),
             Token::FALSE => Expr::EConst(ast::Const::Bool(false)),
             Token::Var(x) => Expr::EVar(x),
-            Token::INPUT => Expr::Input
+            Token::INPUT => Expr::EInput
         }
         .labelled("value");
 
+        let ident = select! { Token::Var(ident) => ident.clone() };
+        let call = ident
+            .then(
+                expr.clone()
+                    .separated_by(just(Token::COMMA))
+                    .allow_trailing()
+                    .delimited_by(just(Token::LPAREN), just(Token::RPAREN)),
+            )
+            .map(|(f, args)| Expr::ECall(f, args));
+
         let atom = val.or(expr
-            .clone()
+            .or(call)
             .delimited_by(just(Token::LPAREN), just(Token::RPAREN)));
 
         let unary = just(Token::Op("-".to_owned()))
@@ -78,53 +88,59 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
     })
 }
 
+fn assignment_parser(
+) -> impl Parser<lexer::Token, ast::Command, Error = Simple<lexer::Token>> + Clone {
+    use ast::Command;
+    use lexer::Token;
+
+    let ident = select! { Token::Var(ident) => ident.clone() };
+
+    let prop_target = ident.then(
+        ident
+            .separated_by(just(Token::COMMA))
+            .delimited_by(just(Token::LPAREN), just(Token::RPAREN)), // .at_most(1),
+    );
+
+    let assign_wrapper = select! {
+        Token::EQUAL => Command::Global as fn(String, ast::Expr) -> ast::Command,
+        Token::NEXT => Command::Next as fn(String, ast::Expr) -> ast::Command,
+        Token::LARROW => Command::Update as fn(String, ast::Expr) -> ast::Command,
+        Token::FUTURE => Command::Finally as fn(String, ast::Expr) -> ast::Command
+    };
+
+    // let foo = assign_wrapper.map(|x| x("".to_string(), ast::Expr::EInput));
+
+    let assignment = choice((
+        ident
+            .then(assign_wrapper)
+            .then(expr_parser())
+            .map(|((name, wrapper), expr)| wrapper(name, expr)),
+        prop_target.then(assign_wrapper).then(expr_parser()).map(
+            |(((p_name, p_args), wrapper), expr)| {
+                let expr = ast::Expr::EPred(p_name.clone(), p_args, Box::new(expr));
+                wrapper(p_name, expr)
+            },
+        ),
+    ));
+
+    assignment
+}
+
 pub fn parser() -> impl Parser<lexer::Token, ast::Program, Error = Simple<lexer::Token>> + Clone {
     use lexer::Token;
 
     let prog = recursive(|_| {
         use ast::Command;
-        let ident = select! { Token::Var(ident) => ident.clone() };
-
         // ---
-        let timestep = just(Token::THREEDASH).to(ast::Command::Timestep);
-
-        // =
-        let global = ident
-            .then_ignore(just(Token::EQUAL))
-            .then(expr_parser())
-            .map(|(x, e)| Command::Global(x, e));
-
-        // <X
-        let next = ident
-            .then_ignore(just(Token::NEXT))
-            .then(expr_parser())
-            .map(|(x, e)| Command::Next(x, e));
-
-        // <-
-        let update = ident
-            .then_ignore(just(Token::LARROW))
-            .then(expr_parser())
-            .map(|(x, e)| Command::Update(x, e));
-
-        // <..
-        let finally = ident
-            .then_ignore(just(Token::FUTURE))
-            .then(expr_parser())
-            .map(|(x, e)| Command::Finally(x, e));
+        let timestep = just(Token::THREEDASH).to(Command::Timestep);
 
         let print = just(Token::PRINT)
             .then(expr_parser())
-            .map(|(_, e)| ast::Command::Print(e));
+            .map(|(_, e)| Command::Print(e));
 
         let newline = just(Token::NEWLINE).or(just(Token::COMMENT));
 
-        let statement = timestep
-            .clone()
-            .or(global.clone())
-            .or(next.clone())
-            .or(update.clone())
-            .or(finally.clone())
-            .or(print.clone());
+        let statement = timestep.clone().or(assignment_parser()).or(print.clone());
 
         newline
             .clone()

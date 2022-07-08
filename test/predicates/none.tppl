@@ -1,0 +1,6 @@
+abs(x) = x > 0 & x
+abs(x) = x < 0 & -x
+
+print abs(3) // 3
+print abs(-7) // 7
+print abs(0) // No Predicate Allows This...

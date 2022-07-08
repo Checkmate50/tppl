@@ -6,6 +6,7 @@ use crate::types;
 pub enum Const {
     Bool(bool),
     Number(i64),
+    // pdf
 }
 
 pub type Var = String;
@@ -34,7 +35,9 @@ pub enum Expr {
     EVar(Var),
     EBinop(Binop, Box<Expr>, Box<Expr>),
     EUnop(Unop, Box<Expr>),
-    Input,
+    EInput,
+    ECall(Var, Vec<Expr>),
+    EPred(Var, Vec<Var>, Box<Expr>),
 }
 
 #[derive(Clone, Hash, Debug, PartialEq)]
@@ -55,7 +58,10 @@ pub enum TypedExpr {
     TEVar(Var, types::Type),
     TEBinop(Binop, Box<TypedExpr>, Box<TypedExpr>, types::Type),
     TEUnop(Unop, Box<TypedExpr>, types::Type),
-    TInput(types::Type),
+    TEInput(types::Type),
+    TECall(Var, Vec<TypedExpr>, types::Type),
+    // Infer type of parameters?
+    TEPred(Var, Vec<Var>, Box<TypedExpr>, types::Type),
 }
 
 #[derive(Clone, Hash, Debug, PartialEq)]
@@ -69,7 +75,7 @@ pub enum TypedCommand {
 
 // `y` is the free var in `f(x) = x * y`
 pub type FreeVars = HashSet<Var>;
-// only counts Global/Finally since those are the only immediately available.
+// only counts `current` since those are the only immediately available.
 pub type DefVars = HashSet<Var>;
 
 pub type TypedTimeBlock = Vec<TypedCommand>;
@@ -86,6 +92,8 @@ pub fn type_of_typedexpr(e: TypedExpr) -> types::Type {
         TypedExpr::TEVar(_, t) => t,
         TypedExpr::TEBinop(_, _, _, t) => t,
         TypedExpr::TEUnop(_, _, t) => t,
-        TypedExpr::TInput(t) => t,
+        TypedExpr::TEInput(t) => t,
+        TypedExpr::TECall(_, _, t) => t,
+        TypedExpr::TEPred(_, _, _, t) => t,
     }
 }
