@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::collections::HashSet;
 use std::cmp::Eq;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::hash::Hash;
 use std::iter;
 
 use crate::ast;
@@ -140,10 +140,10 @@ impl VarContext {
     //     }
     // }
 
-    fn get_from_hashmap<'a, K : Hash + Eq, V>(hm : &'a HashMap<K, V>, key: &'a K) -> Option<&'a V> {
+    fn get_from_hashmap<'a, K: Hash + Eq, V>(hm: &'a HashMap<K, V>, key: &'a K) -> Option<&'a V> {
         match hm.get(key) {
             Some(x) => Some(x),
-            None => None
+            None => None,
         }
     }
 
@@ -156,21 +156,22 @@ impl VarContext {
                     if let Some(until_conds) = temp.is_until.clone() {
                         let udep_map = &self.udep_map;
                         let mut context_clone = self.clone();
-                        let evaled_conds: Result<Vec<_>, errors::ExecutionTimeError> = until_conds.strong
+                        let evaled_conds: Result<Vec<_>, errors::ExecutionTimeError> = until_conds
+                            .strong
                             .iter()
                             .chain(until_conds.weak.iter())
                             .map(|until_cond| {
-                                    let cond_texpr = Self::get_from_hashmap(udep_map, until_cond).unwrap();
-                                    eval_expr(cond_texpr.to_owned(), &mut context_clone)
-                                }
-                            ).collect();
+                                let cond_texpr =
+                                    Self::get_from_hashmap(udep_map, until_cond).unwrap();
+                                eval_expr(cond_texpr.to_owned(), &mut context_clone)
+                            })
+                            .collect();
                         if evaled_conds?.into_iter().any(boolify) {
                             self.destruct_value(
                                 dep_name.clone(),
                                 (temp.to_owned(), texpr.to_owned()),
                             )?;
                         }
-
 
                         // for until_cond in until_conds.strong.iter().chain(until_conds.weak.iter()) {
                         //     let cond_texpr = Self::get_from_hashmap(&self.udep_map, until_cond).unwrap();
@@ -182,8 +183,6 @@ impl VarContext {
                         //         )?;
                         //     }
                         // }
-
-
                     }
                 }
             }
@@ -373,6 +372,16 @@ pub fn boolify(texpr: TypedExpr) -> bool {
         TypedExpr::TEConst(c, _) => match c {
             ast::Const::Bool(b) => b,
             ast::Const::Number(_) => panic!("Truthy-falsey not implemented yet for integers."),
+        },
+        _ => panic!("Truthy-falsey not implemented yet for non-constants."),
+    }
+}
+
+pub fn is_success(texpr: TypedExpr) -> bool {
+    match texpr {
+        TypedExpr::TEConst(c, _) => match c {
+            ast::Const::Bool(b) => b,
+            ast::Const::Number(_) => true,
         },
         _ => panic!("Truthy-falsey not implemented yet for non-constants."),
     }
@@ -647,7 +656,8 @@ pub fn eval_expr(
             // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
             let preds = ctx.look_up(&name)?;
 
-            let currents: Vec<Value> = preds.clone()
+            let currents: Vec<Value> = preds
+                .clone()
                 .into_iter()
                 .filter(|(Type(temp, _), _)| {
                     temp.when_available == types::TemporalAvailability::Current
@@ -660,7 +670,8 @@ pub fn eval_expr(
                 })
                 .collect();
 
-            let curr_successes = run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
+            let curr_successes =
+                run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
             if curr_successes.len() == 0 {
                 let futu_successes = run_predicate_definitions(name, futures, args, ctx)?;
                 if futu_successes.len() == 0 {
@@ -704,8 +715,9 @@ pub fn run_predicate_definitions(
                     // perhaps do runtime typecheck here?
                     local_context.add_var(&param, &arg, &type_of_typedexpr(arg.clone()))?;
                 }
-                let val = eval_expr(*body, ctx)?;
-                if boolify(val.clone()) {
+
+                let val = eval_expr(*body, &mut local_context)?;
+                if is_success(val.clone()) {
                     successes.push(val);
                 }
             } else {

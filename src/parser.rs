@@ -25,9 +25,9 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
             )
             .map(|(f, args)| Expr::ECall(f, args));
 
-        let atom = val.or(expr
-            .or(call)
-            .delimited_by(just(Token::LPAREN), just(Token::RPAREN)));
+        let atom = call
+            .or(val)
+            .or(expr.delimited_by(just(Token::LPAREN), just(Token::RPAREN)));
 
         let unary = just(Token::Op("-".to_owned()))
             .to(ast::Unop::Neg)
@@ -107,8 +107,6 @@ fn assignment_parser(
         Token::LARROW => Command::Update as fn(String, ast::Expr) -> ast::Command,
         Token::FUTURE => Command::Finally as fn(String, ast::Expr) -> ast::Command
     };
-
-    // let foo = assign_wrapper.map(|x| x("".to_string(), ast::Expr::EInput));
 
     let assignment = choice((
         ident

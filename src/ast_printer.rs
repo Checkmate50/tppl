@@ -48,7 +48,14 @@ pub fn string_of_expr(e: ast::Expr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Expr::EPred(_name, _args, _body) => panic!("Not Implemented Yet."),
+        Expr::EPred(_name, _args, body) => string_of_expr(*body),
+    }
+}
+
+pub fn string_of_target(name: String, e: ast::Expr) -> String {
+    match e {
+        ast::Expr::EPred(_name, args, _body) => name + "(" + &args.join(",") + ")",
+        _ => name,
     }
 }
 
@@ -56,10 +63,10 @@ pub fn string_of_command(cmd: ast::Command) -> String {
     use ast::Command;
     match cmd {
         Command::Timestep => "---".to_owned(),
-        Command::Global(v, e) => v + " = " + &string_of_expr(e),
-        Command::Next(v, e) => v + " <X " + &string_of_expr(e),
-        Command::Update(v, e) => v + " <- " + &string_of_expr(e),
-        Command::Finally(v, e) => v + " <.. " + &string_of_expr(e),
+        Command::Global(v, e) => string_of_target(v, e.clone()) + " = " + &string_of_expr(e),
+        Command::Next(v, e) => string_of_target(v, e.clone()) + " <X " + &string_of_expr(e),
+        Command::Update(v, e) => string_of_target(v, e.clone()) + " <- " + &string_of_expr(e),
+        Command::Finally(v, e) => string_of_target(v, e.clone()) + " <.. " + &string_of_expr(e),
         Command::Print(e) => "print ".to_owned() + &string_of_expr(e),
     }
 }

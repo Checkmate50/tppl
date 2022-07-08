@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::iter;
 
 use crate::ast::{self, type_of_typedexpr};
-use crate::errors::{self, CompileTimeError};
+use crate::errors::{self, CompileTimeError, ConstrainError};
 use crate::types;
 use ast::Var;
 
@@ -14,7 +14,7 @@ use petgraph::stable_graph::NodeIndex;
 // use petgraph::algo::min_spanning_tree;
 // use petgraph::algo::is_cyclic_directed;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeContext {
     // only global scope
     pub vars: HashMap<Var, (Vec<types::TemporalType>, types::SimpleType)>,
@@ -387,32 +387,65 @@ pub fn infer_expr(
             types::SimpleType::Int,
         ))),
         Expr::ECall(name, args) => {
-            let typed_args: Result<Vec<ast::TypedExpr>, CompileTimeError> = args
+            // temporal type of arguments. these can't be temporally `undefined`, which `infer_expr` would blindly give.
+            // we need to simulate `=` assignment in `local_context`.
+            let temporal_ty_arg = TemporalType {
+                when_available: types::TemporalAvailability::Current,
+                when_dissipates: types::TemporalPersistency::Always,
+                is_until: None,
+            };
+
+            let typed_args: Result<Vec<TypedExpr>, CompileTimeError> = args
                 .into_iter()
                 .map(|e| infer_expr(e, ctx, until_dependencies, udep_map))
                 .collect();
-            let typed_args = typed_args?;
+            let typed_args: Result<Vec<TypedExpr>, ConstrainError> = typed_args?
+                .into_iter()
+                .map(|texpr| {
+                    new_texpr(
+                        texpr,
+                        Type(temporal_ty_arg.clone(), SimpleType::Undefined),
+                        "Somehow `typecheck::infer_expr` didn't give `Type(Temp:Und, Simpl:Und)`"
+                            .to_string(),
+                    )
+                })
+                .collect();
 
             let Type(_, return_type) = ctx.look_up(&name)?;
             Ok(TypedExpr::TECall(
                 name,
-                typed_args,
+                typed_args?,
                 Type(temporal_undefined, return_type),
             ))
         }
         Expr::EPred(name, params, body) => {
-            let typed_body = infer_expr(*body, ctx, until_dependencies, udep_map)?;
-
-            // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
-            // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
-            let simpl_return_type =
-                SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
+            // temporal type of parameters
+            let temporal_ty_param = TemporalType {
+                when_available: types::TemporalAvailability::Current,
+                when_dissipates: types::TemporalPersistency::Always,
+                is_until: None,
+            };
 
             // not inferring parameters rn.
             let arg_types: Vec<Box<SimpleType>> = params
                 .iter()
                 .map(|_| Box::new(SimpleType::Undefined))
                 .collect();
+
+            let mut local_context = ctx.clone();
+            for param in params.iter() {
+                local_context.add_name(
+                    param,
+                    Type(temporal_ty_param.clone(), SimpleType::Undefined),
+                )?;
+            }
+
+            let typed_body = infer_expr(*body, &mut local_context, until_dependencies, udep_map)?;
+
+            // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
+            // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
+            let simpl_return_type =
+                SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
 
             Ok(TypedExpr::TEPred(
                 name,
@@ -664,12 +697,10 @@ pub fn infer_timeblock(
     ctx: &mut TypeContext,
     udep_map: &mut HashMap<u64, ast::TypedExpr>,
 ) -> Result<ast::TypedTimeBlock, errors::CompileTimeError> {
-    // println!("old variables: {:?}", ctx.vars);
     let cmds: Result<ast::TypedTimeBlock, _> = block
         .iter()
         .map(|cmd| infer_command(cmd.clone(), ctx, udep_map))
         .collect();
-    // println!("new variables: {:?}", ctx.vars);
     ctx.step_time();
 
     cmds
@@ -771,8 +802,6 @@ pub fn arrange_by_dependencies(
             .map(|(def_var, free_vars)| (def_var.unwrap(), free_vars)), // if `defined_vars.contains(tup.0)`
     );
 
-    // println!("free_vars_by_cmd = {:?}", free_vars_by_cmd);
-
     // scan for recursive definitions. since `defined_vars_of_command` excludes next/update, all recursive definitions are blocked.
 
     let mut graph = Graph::<Var, i32>::new();
@@ -852,7 +881,6 @@ pub fn infer_program(program: ast::Program) -> Result<ast::TypedProgram, errors:
         arranged_program.into_iter().collect();
     let arranged_program = arranged_program?;
 
-    // println!("Arranged : {:?}", arranged_program);
     let inferred_program: Vec<Vec<ast::TypedCommand>> = arranged_program
         .iter()
         .map(|block| infer_timeblock(block.to_vec(), &mut ctx, &mut udep_map))
