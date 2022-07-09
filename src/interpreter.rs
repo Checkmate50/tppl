@@ -477,35 +477,26 @@ pub fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
     }
 }
 
-pub fn type_of_constant(c: ast::Const) -> types::Type {
-    let temporal_undefined = TemporalType {
-        when_available: types::TemporalAvailability::Undefined,
-        when_dissipates: types::TemporalPersistency::Undefined,
-        is_until: None,
-    };
-
-    match c {
-        ast::Const::Number(_) => types::Type(temporal_undefined, types::SimpleType::Int),
-        ast::Const::Bool(_) => types::Type(temporal_undefined, types::SimpleType::Bool),
-    }
-}
-
 pub fn eval_expr(
     e: TypedExpr,
     ctx: &mut VarContext,
 ) -> Result<TypedExpr, errors::ExecutionTimeError> {
     match e {
         TypedExpr::TEConst(_, _) => Ok(e),
-        TypedExpr::TEVar(var_name, _) => {
+        TypedExpr::TEVar(var_name, t) => {
             let values: Vec<Value> = ctx.look_up(&var_name)?;
             let (ty, texpr) = values.get(0).unwrap();
             if types::is_currently_available(&ty.get_temporal()) {
-                Ok(texpr.to_owned())
+                Ok(ast::new_texpr(
+                    texpr.to_owned(),
+                    t,
+                    "Variable gave unexpected type.".to_string(),
+                )?)
             } else {
                 Err(errors::CurrentlyUnavailableError{message : format!("You tried access a value that's only available in the next timestep... Temporal Type was {:?}", ty).to_string()})?
             }
         }
-        TypedExpr::TEBinop(b, e1, e2, _) => {
+        TypedExpr::TEBinop(b, e1, e2, t) => {
             use ast::Binop;
             use ast::Const;
 
@@ -517,68 +508,44 @@ pub fn eval_expr(
                 _ => panic!("Did not receive a constant after evaluation."),
             };
 
-            match b {
+            let result: Const = match b {
                 Binop::Plus => match (c1, c2) {
-                    (Const::Number(n1), Const::Number(n2)) => {
-                        let constant = Const::Number(n1 + n2);
-                        Ok(TypedExpr::TEConst(
-                            constant.clone(),
-                            type_of_constant(constant),
-                        ))
-                    }
+                    (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 + n2),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Minus => match (c1, c2) {
-                    (Const::Number(n1), Const::Number(n2)) => {
-                        let constant = Const::Number(n1 - n2);
-                        Ok(TypedExpr::TEConst(
-                            constant.clone(),
-                            type_of_constant(constant),
-                        ))
-                    }
+                    (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 - n2),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Times => match (c1, c2) {
-                    (Const::Number(n1), Const::Number(n2)) => {
-                        let constant = Const::Number(n1 * n2);
-                        Ok(TypedExpr::TEConst(
-                            constant.clone(),
-                            type_of_constant(constant),
-                        ))
-                    }
+                    (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 * n2),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Div => match (c1, c2) {
-                    (Const::Number(n1), Const::Number(n2)) => {
-                        let constant = Const::Number((n1 / n2) as i64);
-                        Ok(TypedExpr::TEConst(
-                            constant.clone(),
-                            type_of_constant(constant),
-                        ))
-                    }
+                    (Const::Number(n1), Const::Number(n2)) => Const::Number((n1 / n2) as i64),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Or => match (c1.clone(), c2) {
                     (Const::Bool(b1), c2) => {
-                        let constant = if b1 { c1 } else { c2 };
-                        Ok(TypedExpr::TEConst(
-                            constant.clone(),
-                            type_of_constant(constant),
-                        ))
+                        if b1 {
+                            c1
+                        } else {
+                            c2
+                        }
                     }
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::And => match (c1.clone(), c2) {
                     (Const::Bool(b1), c2) => {
-                        let constant = if b1 { c2 } else { c1 };
-                        Ok(TypedExpr::TEConst(
-                            constant.clone(),
-                            type_of_constant(constant),
-                        ))
+                        if b1 {
+                            c2
+                        } else {
+                            c1
+                        }
                     }
                     _ => panic!("Type-checking failed??"),
                 },
-                Binop::Until => match (c1.clone(), c2) {
+                Binop::Until | Binop::SUntil => match (c1.clone(), c2) {
                     (_, Const::Bool(cond)) => {
                         if cond {
                             Err(errors::UntilVoidError {
@@ -586,35 +553,21 @@ pub fn eval_expr(
                                     .to_string(),
                             })?
                         } else {
-                            let constant = c1;
-                            Ok(TypedExpr::TEConst(
-                                constant.clone(),
-                                type_of_constant(constant),
-                            ))
+                            c1
                         }
                     }
                     _ => panic!("Not Implemented"),
                 },
-                Binop::SUntil => match (c1.clone(), c2) {
-                    (_, Const::Bool(cond)) => {
-                        if cond {
-                            Err(errors::UntilVoidError {
-                                message: "Until's condition is true by the time of evaluation"
-                                    .to_string(),
-                            })?
-                        } else {
-                            let constant = c1;
-                            Ok(TypedExpr::TEConst(
-                                constant.clone(),
-                                type_of_constant(constant),
-                            ))
-                        }
-                    }
-                    _ => panic!("Not Implemented"),
-                },
-            }
+            };
+
+            let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
+            Ok(ast::new_texpr(
+                constant,
+                t,
+                "Binop gave unexpected type.".to_string(),
+            )?)
         }
-        TypedExpr::TEUnop(u, e1, _) => {
+        TypedExpr::TEUnop(u, e1, t) => {
             use ast::Const;
             use ast::Unop;
 
@@ -624,7 +577,7 @@ pub fn eval_expr(
                 _ => panic!("Did not receive a constant after evaluation."),
             };
 
-            let constant = match u {
+            let result = match u {
                 Unop::Neg => match c {
                     Const::Bool(_) => panic!("Type-checking failed??"),
                     Const::Number(n) => Const::Number(-n),
@@ -634,10 +587,12 @@ pub fn eval_expr(
                     Const::Number(_) => panic!("Type-checking failed??"),
                 },
             };
-            Ok(TypedExpr::TEConst(
-                constant.clone(),
-                type_of_constant(constant),
-            ))
+            let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
+            Ok(ast::new_texpr(
+                constant,
+                t,
+                "Unop gave unexpected type.".to_string(),
+            )?)
         }
         TypedExpr::TEInput(t) => {
             let mut buffer = String::new();
@@ -652,7 +607,7 @@ pub fn eval_expr(
                 })?
             }
         }
-        TypedExpr::TECall(name, args, _) => {
+        TypedExpr::TECall(name, args, return_type) => {
             // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
             let preds = ctx.look_up(&name)?;
 
@@ -670,10 +625,16 @@ pub fn eval_expr(
                 })
                 .collect();
 
-            let curr_successes =
-                run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
+            let curr_successes = run_predicate_definitions(
+                name.clone(),
+                currents,
+                args.clone(),
+                ctx,
+                return_type.clone(),
+            )?;
             if curr_successes.len() == 0 {
-                let futu_successes = run_predicate_definitions(name, futures, args, ctx)?;
+                let futu_successes =
+                    run_predicate_definitions(name, futures, args, ctx, return_type)?;
                 if futu_successes.len() == 0 {
                     Err(errors::NoPredicateError {
                         message: "No Predicates succeeded".to_string(),
@@ -705,6 +666,7 @@ pub fn run_predicate_definitions(
     definitions: Vec<Value>,
     args: Vec<TypedExpr>,
     ctx: &mut VarContext,
+    return_type: Type,
 ) -> Result<Vec<TypedExpr>, ExecutionTimeError> {
     let mut successes: Vec<TypedExpr> = Vec::new();
     for (Type(_, simpl), pred) in definitions.into_iter() {
@@ -718,7 +680,12 @@ pub fn run_predicate_definitions(
 
                 let val = eval_expr(*body, &mut local_context)?;
                 if is_success(val.clone()) {
-                    successes.push(val);
+                    let type_checked_val = ast::new_texpr(
+                        val,
+                        return_type.clone(),
+                        "predicate gave a funky type".to_string(),
+                    )?;
+                    successes.push(type_checked_val);
                 }
             } else {
                 panic!("There shouldn't be any non-predicates..?")

@@ -30,7 +30,7 @@ fn main() {
                 let program_result = match typecheck::infer_program(prog.unwrap()) {
                     Ok(ty_prog) => match interpreter::exec_program(ty_prog.clone()) {
                         Ok(_) => {
-                            println!("{:?}", ty_prog);
+                            // println!("{:?}", ty_prog);
                             println!("Executed");
                             Ok(())
                         }

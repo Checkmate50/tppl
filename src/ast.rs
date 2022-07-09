@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::types;
+use crate::{errors, types};
 
 #[derive(Clone, Hash, Debug, PartialEq)]
 pub enum Const {
@@ -95,5 +95,57 @@ pub fn type_of_typedexpr(e: TypedExpr) -> types::Type {
         TypedExpr::TEInput(t) => t,
         TypedExpr::TECall(_, _, t) => t,
         TypedExpr::TEPred(_, _, _, t) => t,
+    }
+}
+
+pub fn type_of_constant(c: Const) -> types::Type {
+    let temporal_undefined = types::TemporalType {
+        when_available: types::TemporalAvailability::Undefined,
+        when_dissipates: types::TemporalPersistency::Undefined,
+        is_until: None,
+    };
+
+    match c {
+        Const::Number(_) => types::Type(temporal_undefined, types::SimpleType::Int),
+        Const::Bool(_) => types::Type(temporal_undefined, types::SimpleType::Bool),
+    }
+}
+
+pub fn new_texpr(
+    e: TypedExpr,
+    constraint: types::Type,
+    msg: String,
+) -> Result<TypedExpr, errors::ConstrainError> {
+    use types::constrain;
+
+    match e {
+        TypedExpr::TEConst(c, old_type) => {
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TEConst(c, t))
+        }
+        TypedExpr::TEVar(v, old_type) => {
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TEVar(v, t))
+        }
+        TypedExpr::TEBinop(b, e1, e2, old_type) => {
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TEBinop(b, Box::new(*e1), Box::new(*e2), t))
+        }
+        TypedExpr::TEUnop(u, e1, old_type) => {
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TEUnop(u, Box::new(*e1), t))
+        }
+        TypedExpr::TEInput(old_type) => {
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TEInput(t))
+        }
+        TypedExpr::TECall(name, args, old_type) => {
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TECall(name, args, t))
+        }
+        TypedExpr::TEPred(name, args, body, old_type) => {
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TEPred(name, args, body, t))
+        }
     }
 }

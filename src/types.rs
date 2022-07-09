@@ -7,6 +7,9 @@ pub enum SimpleType {
     Int,
     // Pdf,
     Predicate(Vec<Box<SimpleType>>, Box<SimpleType>),
+    // currently, `interpreters::run_predicate_definitions` doesn't use `Option` in its fullness.
+    // It first checks if it's correct (ie. a "Some"). Then, it does type-checking.
+    // Failure is handled without using `Option` since `interpreters::is_success` pattern matches on texpr (ignoring type).
     Option(Box<SimpleType>),
     Undefined,
 }
@@ -22,6 +25,12 @@ impl SimpleType {
     pub fn is_numeric(&self) -> bool {
         match self {
             SimpleType::Int => true,
+            _ => false,
+        }
+    }
+    pub fn is_option(&self) -> bool {
+        match self {
+            SimpleType::Option(_) => true,
             _ => false,
         }
     }
@@ -176,4 +185,75 @@ pub fn resolve_simple_conflicts(
             message: format!("").to_string(),
         })?,
     }
+}
+
+pub fn constrain(ty: &Type, con_ty: &Type, msg: String) -> Result<Type, errors::ConstrainError> {
+    let Type(temp1, simp1) = ty;
+    let Type(temp2, simp2) = con_ty;
+
+    let simp: SimpleType = match (simp1, simp2) {
+        (SimpleType::Undefined, b) => b.to_owned(),
+        (a, SimpleType::Undefined) => a.to_owned(),
+        (SimpleType::Option(a), b) => constrain(
+            &Type(temp1.to_owned(), *(a.to_owned())),
+            &Type(temp2.to_owned(), b.to_owned()),
+            msg.clone(),
+        )?
+        .get_simpl(),
+        (a, SimpleType::Option(b)) => constrain(
+            &Type(temp1.to_owned(), a.to_owned()),
+            &Type(temp2.to_owned(), *(b.to_owned())),
+            msg.clone(),
+        )?
+        .get_simpl(),
+        (SimpleType::Predicate(args_types1, ret1), SimpleType::Predicate(args_types2, ret2)) => {
+            let arg_ts: Result<Vec<Type>, errors::ConstrainError> = args_types1
+                .iter()
+                .zip(args_types2.iter())
+                .map(|(a, b)| {
+                    constrain(
+                        &Type(temp1.clone(), *(a.to_owned())),
+                        &Type(temp2.clone(), *(b.to_owned())),
+                        msg.clone(),
+                    )
+                })
+                .collect();
+            let arg_ts: Vec<Box<SimpleType>> =
+                arg_ts?.iter().map(Type::get_simpl).map(Box::new).collect();
+            let ret = constrain(
+                &Type(temp1.clone(), *(ret1.to_owned())),
+                &Type(temp2.clone(), *(ret2.to_owned())),
+                msg.clone(),
+            );
+            SimpleType::Predicate(arg_ts, Box::new(ret?.get_simpl()))
+        }
+        (a, b) if a == b => a.to_owned(),
+        _ => Err(errors::ConstrainError {
+            message: msg.clone(),
+        })?,
+    };
+
+    let temp = match (temp1, temp2) {
+        (
+            TemporalType {
+                when_available: TemporalAvailability::Undefined,
+                when_dissipates: TemporalPersistency::Undefined,
+                is_until: None,
+            },
+            b,
+        ) => b,
+        (
+            a,
+            TemporalType {
+                when_available: TemporalAvailability::Undefined,
+                when_dissipates: TemporalPersistency::Undefined,
+                is_until: None,
+            },
+        ) => a,
+        // I doubt I'll need to add cases like `(Global, Current)`, but perhaps I'll need to
+        (a, b) if a == b => a,
+        _ => Err(errors::ConstrainError { message: msg })?,
+    };
+
+    Ok(Type(temp.to_owned(), simp))
 }

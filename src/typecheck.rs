@@ -193,44 +193,6 @@ pub fn sort_types_by_immediacy(
     }
 }
 
-pub fn new_texpr(
-    e: ast::TypedExpr,
-    constraint: types::Type,
-    msg: String,
-) -> Result<ast::TypedExpr, errors::ConstrainError> {
-    use ast::TypedExpr;
-    match e {
-        TypedExpr::TEConst(c, old_type) => {
-            let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEConst(c, t))
-        }
-        TypedExpr::TEVar(v, old_type) => {
-            let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEVar(v, t))
-        }
-        TypedExpr::TEBinop(b, e1, e2, old_type) => {
-            let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEBinop(b, Box::new(*e1), Box::new(*e2), t))
-        }
-        TypedExpr::TEUnop(u, e1, old_type) => {
-            let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEUnop(u, Box::new(*e1), t))
-        }
-        TypedExpr::TEInput(old_type) => {
-            let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEInput(t))
-        }
-        TypedExpr::TECall(name, args, old_type) => {
-            let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TECall(name, args, t))
-        }
-        TypedExpr::TEPred(name, args, body, old_type) => {
-            let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEPred(name, args, body, t))
-        }
-    }
-}
-
 pub fn infer_expr(
     e: ast::Expr,
     ctx: &mut TypeContext,
@@ -263,13 +225,13 @@ pub fn infer_expr(
                     //     thus, perhaps `let ty1 = types::Type(Nil, SimpleType::Int)`?
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Int);
                     let ty2 = Type(temporal_undefined.clone(), SimpleType::Int);
-                    let op1 = new_texpr(
+                    let op1 = ast::new_texpr(
                         operand1,
                         ty1,
                         "Left operand of an arithmetic binary operator must be an integer."
                             .to_string(),
                     )?;
-                    let op2 = new_texpr(
+                    let op2 = ast::new_texpr(
                         operand2,
                         ty2,
                         "Right operand of an arithmetic binary operator must be an integer."
@@ -284,13 +246,13 @@ pub fn infer_expr(
                 Binop::Or | Binop::And => {
                     // todo: negation as failure?
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
-                    let op1 = new_texpr(
+                    let op1 = ast::new_texpr(
                         operand1,
                         ty1,
                         "Left operand of a logical operator must be a boolean.".to_string(),
                     )?;
                     // let ty2 = Type(temporal_undefined.clone(), SimpleType::Bool);
-                    // let op2 = new_texpr(operand2, ty2, "Right operand of a logical operator must be a boolean.".to_string())?;
+                    // let op2 = ast::new_texpr(operand2, ty2, "Right operand of a logical operator must be a boolean.".to_string())?;
                     let op2 = operand2;
 
                     // let t = Type(temporal_undefined, SimpleType::Bool);
@@ -300,13 +262,13 @@ pub fn infer_expr(
                 Binop::Until => {
                     // todo: truthiness
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Undefined);
-                    let op1 = new_texpr(
+                    let op1 = ast::new_texpr(
                         operand1,
                         ty1,
                         "Left operand of Until should have type 'current'.".to_string(),
                     )?;
                     let ty2 = Type(temporal_undefined, SimpleType::Bool);
-                    let op2 = new_texpr(operand2, ty2, "Right operand of Until should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
+                    let op2 = ast::new_texpr(operand2, ty2, "Right operand of Until should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
                     until_dependencies.weak.push(calculate_hash(&op2));
                     udep_map.insert(calculate_hash(&op2), op2.clone());
 
@@ -317,13 +279,13 @@ pub fn infer_expr(
                     // the same as `Until` because `SUntil(A, B) :- Until(A, B) and Finally(B)` can be done when translating to LTL/BA.
                     // todo: truthiness
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Undefined);
-                    let op1 = new_texpr(
+                    let op1 = ast::new_texpr(
                         operand1,
                         ty1,
                         "Left operand of SUntil should have type 'current'.".to_string(),
                     )?;
                     let ty2 = Type(temporal_undefined, SimpleType::Bool);
-                    let op2 = new_texpr(operand2, ty2, "Right operand of SUntil should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
+                    let op2 = ast::new_texpr(operand2, ty2, "Right operand of SUntil should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
                     until_dependencies.strong.push(calculate_hash(&op2));
                     udep_map.insert(calculate_hash(&op2), op2.clone());
 
@@ -346,7 +308,7 @@ pub fn infer_expr(
             match u {
                 Unop::Neg => {
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Int);
-                    let op1 = new_texpr(
+                    let op1 = ast::new_texpr(
                         operand1,
                         ty1,
                         "Neg operator only works on integers.".to_string(),
@@ -358,7 +320,7 @@ pub fn infer_expr(
                 Unop::Not => {
                     // todo: truthiness
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
-                    let op1 = new_texpr(
+                    let op1 = ast::new_texpr(
                         operand1,
                         ty1,
                         "Not operator only works on booleans.".to_string(),
@@ -387,36 +349,41 @@ pub fn infer_expr(
             types::SimpleType::Int,
         ))),
         Expr::ECall(name, args) => {
-            // temporal type of arguments. these can't be temporally `undefined`, which `infer_expr` would blindly give.
-            // we need to simulate `=` assignment in `local_context`.
-            let temporal_ty_arg = TemporalType {
-                when_available: types::TemporalAvailability::Current,
-                when_dissipates: types::TemporalPersistency::Always,
-                is_until: None,
-            };
+            let Type(_, pred_simpl) = ctx.look_up(&name)?;
+            if let SimpleType::Predicate(args_ts, ret) = pred_simpl {
+                // temporal type of arguments. these can't be temporally `undefined`, which `infer_expr` would blindly give.
+                // we need to simulate `=` assignment in `local_context`.
+                let temporal_ty_arg = TemporalType {
+                    when_available: types::TemporalAvailability::Current,
+                    when_dissipates: types::TemporalPersistency::Always,
+                    is_until: None,
+                };
 
-            let typed_args: Result<Vec<TypedExpr>, CompileTimeError> = args
-                .into_iter()
-                .map(|e| infer_expr(e, ctx, until_dependencies, udep_map))
-                .collect();
-            let typed_args: Result<Vec<TypedExpr>, ConstrainError> = typed_args?
-                .into_iter()
-                .map(|texpr| {
-                    new_texpr(
-                        texpr,
-                        Type(temporal_ty_arg.clone(), SimpleType::Undefined),
-                        "Somehow `typecheck::infer_expr` didn't give `Type(Temp:Und, Simpl:Und)`"
-                            .to_string(),
-                    )
-                })
-                .collect();
-
-            let Type(_, return_type) = ctx.look_up(&name)?;
-            Ok(TypedExpr::TECall(
-                name,
-                typed_args?,
-                Type(temporal_undefined, return_type),
-            ))
+                let typed_args: Result<Vec<TypedExpr>, CompileTimeError> = args
+                    .into_iter()
+                    .map(|e| infer_expr(e, ctx, until_dependencies, udep_map))
+                    .collect();
+                let typed_args: Result<Vec<TypedExpr>, ConstrainError> = typed_args?
+                    .into_iter().zip(args_ts.into_iter())
+                    .map(|(texpr, arg_simpl)| {
+                        ast::new_texpr(
+                            texpr,
+                            Type(temporal_ty_arg.clone(), *arg_simpl),
+                            "Somehow `typecheck::infer_expr` didn't give `Type(Temp:Und, Simpl::Arg's)`"
+                                .to_string(),
+                        )
+                    })
+                    .collect();
+                Ok(TypedExpr::TECall(
+                    name,
+                    typed_args?,
+                    Type(temporal_undefined, *ret),
+                ))
+            } else {
+                Err(errors::ImproperCallError {
+                    message: format!("Attempted to call a non-predicate {}", name).to_string(),
+                })?
+            }
         }
         Expr::EPred(name, params, body) => {
             // temporal type of parameters
@@ -514,7 +481,7 @@ pub fn infer_command(
                     ast::type_of_typedexpr(te.clone()).get_simpl(),
                 )
             };
-            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             ctx.add_name(&v, t)?;
             Ok(TypedCommand::TGlobal(v, te))
         }
@@ -539,7 +506,7 @@ pub fn infer_command(
                     ast::type_of_typedexpr(te.clone()).get_simpl(),
                 )
             };
-            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             ctx.add_name(&v, t)?;
             Ok(TypedCommand::TNext(v, te))
         }
@@ -564,7 +531,7 @@ pub fn infer_command(
                     ast::type_of_typedexpr(te.clone()).get_simpl(),
                 )
             };
-            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             ctx.add_name(&v, t)?;
             Ok(TypedCommand::TUpdate(v, te))
         }
@@ -589,7 +556,7 @@ pub fn infer_command(
                     ast::type_of_typedexpr(te.clone()).get_simpl(),
                 )
             };
-            let te = new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
+            let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             ctx.add_name(&v, t)?;
             Ok(TypedCommand::TFinally(v, te))
         }
@@ -889,72 +856,4 @@ pub fn infer_program(program: ast::Program) -> Result<ast::TypedProgram, errors:
         code: inferred_program,
         udep_map: udep_map,
     })
-}
-
-// `con_ty` should be `crate::types::Type(Current, SimpleType)`
-pub fn constrain(
-    ty: &types::Type,
-    con_ty: &types::Type,
-    msg: String,
-) -> Result<types::Type, errors::ConstrainError> {
-    use types::SimpleType;
-    use types::TemporalType;
-    use types::Type;
-
-    let Type(temp1, simp1) = ty;
-    let Type(temp2, simp2) = con_ty;
-
-    let simp: SimpleType = match (simp1, simp2) {
-        (SimpleType::Undefined, b) => b.to_owned(),
-        (a, SimpleType::Undefined) => a.to_owned(),
-        (SimpleType::Predicate(args_types1, ret1), SimpleType::Predicate(args_types2, ret2)) => {
-            let arg_ts: Result<Vec<Type>, errors::ConstrainError> = args_types1
-                .iter()
-                .zip(args_types2.iter())
-                .map(|(a, b)| {
-                    constrain(
-                        &Type(temp1.clone(), *(a.to_owned())),
-                        &Type(temp2.clone(), *(b.to_owned())),
-                        msg.clone(),
-                    )
-                })
-                .collect();
-            let arg_ts: Vec<Box<SimpleType>> =
-                arg_ts?.iter().map(Type::get_simpl).map(Box::new).collect();
-            let ret = constrain(
-                &Type(temp1.clone(), *(ret1.to_owned())),
-                &Type(temp2.clone(), *(ret2.to_owned())),
-                msg.clone(),
-            );
-            SimpleType::Predicate(arg_ts, Box::new(ret?.get_simpl()))
-        }
-        (a, b) if a == b => a.to_owned(),
-        _ => Err(errors::ConstrainError {
-            message: msg.clone(),
-        })?,
-    };
-
-    let temp = match (temp1, temp2) {
-        (
-            TemporalType {
-                when_available: types::TemporalAvailability::Undefined,
-                when_dissipates: types::TemporalPersistency::Undefined,
-                is_until: None,
-            },
-            b,
-        ) => b,
-        (
-            a,
-            TemporalType {
-                when_available: types::TemporalAvailability::Undefined,
-                when_dissipates: types::TemporalPersistency::Undefined,
-                is_until: None,
-            },
-        ) => a,
-        // I doubt I'll need to add cases like `(Global, Current)`, but perhaps I'll need to
-        (a, b) if a == b => a,
-        _ => Err(errors::ConstrainError { message: msg })?,
-    };
-
-    Ok(Type(temp.to_owned(), simp))
 }

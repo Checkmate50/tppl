@@ -88,7 +88,6 @@ pub enum ExecutionTimeError {
 pub enum PredError {
     Zero(NoPredicateError),
     Mult(MultiplePredicateError),
-    Call(ImproperCallError),
 }
 #[derive(Debug)]
 pub enum Error {
@@ -102,6 +101,7 @@ pub enum TypeError {
     Immediacy(CurrentlyUnavailableError),
     TempConflict(TemporalConflictError),
     SimplConflict(SimpleConflictError),
+    Call(ImproperCallError),
 }
 #[derive(Debug)]
 pub enum AssignError {
@@ -169,6 +169,11 @@ impl From<CircularAssignError> for CompileTimeError {
 impl From<ConstrainError> for CompileTimeError {
     fn from(e: ConstrainError) -> Self {
         CompileTimeError::Type(TypeError::Constrain(e))
+    }
+}
+impl From<ConstrainError> for ExecutionTimeError {
+    fn from(e: ConstrainError) -> Self {
+        ExecutionTimeError::Type(TypeError::Constrain(e))
     }
 }
 impl From<CurrentlyUnavailableError> for CompileTimeError {
@@ -266,13 +271,18 @@ impl From<MultiplePredicateError> for ExecutionTimeError {
         ExecutionTimeError::Predicate(PredError::Mult(e))
     }
 }
-impl From<ImproperCallError> for PredError {
+impl From<ImproperCallError> for TypeError {
     fn from(e: ImproperCallError) -> Self {
-        PredError::Call(e)
+        TypeError::Call(e)
     }
 }
 impl From<ImproperCallError> for ExecutionTimeError {
     fn from(e: ImproperCallError) -> Self {
-        ExecutionTimeError::Predicate(PredError::Call(e))
+        ExecutionTimeError::Type(TypeError::Call(e))
+    }
+}
+impl From<ImproperCallError> for CompileTimeError {
+    fn from(e: ImproperCallError) -> Self {
+        CompileTimeError::Type(TypeError::Call(e))
     }
 }
