@@ -5,6 +5,7 @@ pub fn string_of_const(c: ast::Const) -> String {
     match c {
         Const::Bool(b) => b.to_string(),
         Const::Number(n) => n.to_string(),
+        Const::Float(f) => f.to_string(),
     }
 }
 

@@ -2,16 +2,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{errors, types};
 
-#[derive(Clone, Hash, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Const {
     Bool(bool),
     Number(i64),
-    // pdf
+    Float(f64), // pdf
 }
 
 pub type Var = String;
 
-#[derive(Clone, Hash, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Binop {
     Plus,
     Minus,
@@ -23,13 +23,13 @@ pub enum Binop {
     SUntil,
 }
 
-#[derive(Clone, Hash, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Unop {
     Neg,
     Not,
 }
 
-#[derive(Clone, Hash, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     EConst(Const),
     EVar(Var),
@@ -40,7 +40,7 @@ pub enum Expr {
     EPred(Var, Vec<Var>, Box<Expr>),
 }
 
-#[derive(Clone, Hash, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Timestep,
     Global(Var, Expr),
@@ -52,7 +52,7 @@ pub enum Command {
 
 pub type Program = Vec<Command>;
 
-#[derive(Clone, Hash, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TypedExpr {
     TEConst(Const, types::Type),
     TEVar(Var, types::Type),
@@ -64,7 +64,7 @@ pub enum TypedExpr {
     TEPred(Var, Vec<Var>, Box<TypedExpr>, types::Type),
 }
 
-#[derive(Clone, Hash, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TypedCommand {
     TGlobal(Var, TypedExpr),
     TNext(Var, TypedExpr),
@@ -83,7 +83,7 @@ pub type TypedTimeBlock = Vec<TypedCommand>;
 #[derive(Clone, Debug)]
 pub struct TypedProgram {
     pub code: Vec<TypedTimeBlock>,
-    pub udep_map: HashMap<u64, TypedExpr>,
+    pub udep_map: HashMap<usize, TypedExpr>,
 }
 
 pub fn type_of_typedexpr(e: TypedExpr) -> types::Type {
@@ -108,6 +108,7 @@ pub fn type_of_constant(c: Const) -> types::Type {
     match c {
         Const::Number(_) => types::Type(temporal_undefined, types::SimpleType::Int),
         Const::Bool(_) => types::Type(temporal_undefined, types::SimpleType::Bool),
+        Const::Float(_) => types::Type(temporal_undefined, types::SimpleType::Float),
     }
 }
 

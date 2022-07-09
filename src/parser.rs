@@ -8,6 +8,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
     recursive(|expr| {
         let val = select! {
             Token::Number(n) => Expr::EConst(ast::Const::Number(n.parse().unwrap())),
+            Token::Float(f) => Expr::EConst(ast::Const::Float(f.parse().unwrap())),
             Token::TRUE => Expr::EConst(ast::Const::Bool(true)),
             Token::FALSE => Expr::EConst(ast::Const::Bool(false)),
             Token::Var(x) => Expr::EVar(x),

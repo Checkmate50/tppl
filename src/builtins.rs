@@ -1,6 +1,6 @@
 /*
     I only need `lt` and `eq` since I could define the rest in a `prelude.tppl`.
-    eq, neq, lt, lte, gt, gte
+    eq,&&& neq, lt, lte, gt, gte
 */
 
 use std::collections::HashSet;
@@ -48,6 +48,8 @@ pub fn typecheck_builtin_cmp(
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
                 (a, b) if a == b => Ok(SimpleType::Bool),
+                (SimpleType::Int, SimpleType::Float) => Ok(SimpleType::Bool),
+                (SimpleType::Float, SimpleType::Int) => Ok(SimpleType::Bool),
                 _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `'a -> 'a -> bool` but {:?} were provided.", name, args).to_string()})?,
             }
         }
@@ -68,6 +70,9 @@ pub fn typecheck_builtin_cmp(
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
                 (SimpleType::Int, SimpleType::Int) => Ok(SimpleType::Bool),
+                (SimpleType::Int, SimpleType::Float) => Ok(SimpleType::Bool),
+                (SimpleType::Float, SimpleType::Int) => Ok(SimpleType::Bool),
+                (SimpleType::Float, SimpleType::Float) => Ok(SimpleType::Bool),
                 _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `int -> int -> bool` but {:?} were provided.", name, args).to_string()})?,
             }
         }
@@ -117,100 +122,126 @@ pub fn exec_builtin_cmp(
     ))
 }
 
+fn string_of_const_type(c: &ast::Const) -> String {
+    match c {
+        ast::Const::Bool(_) => "Bool".to_string(),
+        ast::Const::Float(_) => "Float".to_string(),
+        ast::Const::Number(_) => "Number".to_string(),
+    }
+}
+
 pub fn builtin_eq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap();
-    let b = args.get(1).unwrap();
-    match (a, b) {
+    let a = args.get(0).unwrap().to_owned();
+    let b = args.get(1).unwrap().to_owned();
+    match (a.clone(), b.clone()) {
         (ast::Const::Bool(b1), ast::Const::Bool(b2)) => Ok(ast::Const::Bool(b1 == b2)),
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 == n2)),
-        (ast::Const::Bool(_), ast::Const::Number(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Int are not comparable".to_string(),
-        }),
-        (ast::Const::Number(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Int and Bool are not comparable".to_string(),
+        (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) == f2)),
+        (ast::Const::Float(f1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(f1 == (n2 as f64))),
+        (ast::Const::Float(f1), ast::Const::Float(f2)) => Ok(ast::Const::Bool(f1 == f2)),
+        (_, _) => Err(errors::SimpleConflictError {
+            message: format!(
+                "{} and {} are not comparable with eq",
+                string_of_const_type(&a),
+                string_of_const_type(&b)
+            )
+            .to_string(),
         }),
     }
 }
 
 pub fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap();
-    let b = args.get(1).unwrap();
-    match (a, b) {
+    let a = args.get(0).unwrap().to_owned();
+    let b = args.get(1).unwrap().to_owned();
+    match (a.clone(), b.clone()) {
         (ast::Const::Bool(b1), ast::Const::Bool(b2)) => Ok(ast::Const::Bool(b1 != b2)),
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 != n2)),
-        (ast::Const::Bool(_), ast::Const::Number(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Int are not comparable".to_string(),
-        }),
-        (ast::Const::Number(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Int and Bool are not comparable".to_string(),
+        (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) != f2)),
+        (ast::Const::Float(f1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(f1 != (n2 as f64))),
+        (ast::Const::Float(f1), ast::Const::Float(f2)) => Ok(ast::Const::Bool(f1 != f2)),
+        (_, _) => Err(errors::SimpleConflictError {
+            message: format!(
+                "{} and {} are not comparable with neq",
+                string_of_const_type(&a),
+                string_of_const_type(&b)
+            )
+            .to_string(),
         }),
     }
 }
 
 pub fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap();
-    let b = args.get(1).unwrap();
-    match (a, b) {
-        (ast::Const::Bool(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Bool cannot use `lt`".to_string(),
-        }),
+    let a = args.get(0).unwrap().to_owned();
+    let b = args.get(1).unwrap().to_owned();
+    match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 < n2)),
-        (ast::Const::Bool(_), ast::Const::Number(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Int are not comparable".to_string(),
-        }),
-        (ast::Const::Number(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Int and Bool are not comparable".to_string(),
+        (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) < f2)),
+        (ast::Const::Float(f1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(f1 < (n2 as f64))),
+        (ast::Const::Float(f1), ast::Const::Float(f2)) => Ok(ast::Const::Bool(f1 < f2)),
+        (_, _) => Err(errors::SimpleConflictError {
+            message: format!(
+                "{} and {} are not comparable with lt",
+                string_of_const_type(&a),
+                string_of_const_type(&b)
+            )
+            .to_string(),
         }),
     }
 }
 
 pub fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap();
-    let b = args.get(1).unwrap();
-    match (a, b) {
-        (ast::Const::Bool(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Bool cannot use `lte`".to_string(),
-        }),
+    let a = args.get(0).unwrap().to_owned();
+    let b = args.get(1).unwrap().to_owned();
+    match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 <= n2)),
-        (ast::Const::Bool(_), ast::Const::Number(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Int are not comparable".to_string(),
-        }),
-        (ast::Const::Number(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Int and Bool are not comparable".to_string(),
+        (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) <= f2)),
+        (ast::Const::Float(f1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(f1 <= (n2 as f64))),
+        (ast::Const::Float(f1), ast::Const::Float(f2)) => Ok(ast::Const::Bool(f1 <= f2)),
+        (_, _) => Err(errors::SimpleConflictError {
+            message: format!(
+                "{} and {} are not comparable with lte",
+                string_of_const_type(&a),
+                string_of_const_type(&b)
+            )
+            .to_string(),
         }),
     }
 }
 
 pub fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap();
-    let b = args.get(1).unwrap();
-    match (a, b) {
-        (ast::Const::Bool(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Bool cannot use `gt`".to_string(),
-        }),
+    let a = args.get(0).unwrap().to_owned();
+    let b = args.get(1).unwrap().to_owned();
+    match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 > n2)),
-        (ast::Const::Bool(_), ast::Const::Number(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Int are not comparable".to_string(),
-        }),
-        (ast::Const::Number(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Int and Bool are not comparable".to_string(),
+        (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) > f2)),
+        (ast::Const::Float(f1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(f1 > (n2 as f64))),
+        (ast::Const::Float(f1), ast::Const::Float(f2)) => Ok(ast::Const::Bool(f1 > f2)),
+        (_, _) => Err(errors::SimpleConflictError {
+            message: format!(
+                "{} and {} are not comparable with gt",
+                string_of_const_type(&a),
+                string_of_const_type(&b)
+            )
+            .to_string(),
         }),
     }
 }
 
 pub fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap();
-    let b = args.get(1).unwrap();
-    match (a, b) {
-        (ast::Const::Bool(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Bool cannot use `gte`".to_string(),
-        }),
+    let a = args.get(0).unwrap().to_owned();
+    let b = args.get(1).unwrap().to_owned();
+    match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 >= n2)),
-        (ast::Const::Bool(_), ast::Const::Number(_)) => Err(errors::SimpleConflictError {
-            message: "Bool and Int are not comparable".to_string(),
-        }),
-        (ast::Const::Number(_), ast::Const::Bool(_)) => Err(errors::SimpleConflictError {
-            message: "Int and Bool are not comparable".to_string(),
+        (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) >= f2)),
+        (ast::Const::Float(f1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(f1 >= (n2 as f64))),
+        (ast::Const::Float(f1), ast::Const::Float(f2)) => Ok(ast::Const::Bool(f1 >= f2)),
+        (_, _) => Err(errors::SimpleConflictError {
+            message: format!(
+                "{} and {} are not comparable with gte",
+                string_of_const_type(&a),
+                string_of_const_type(&b)
+            )
+            .to_string(),
         }),
     }
 }

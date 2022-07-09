@@ -4,4 +4,4 @@ x = 3 <!> y
 x <- 2
 print x 
 ---
-print x # should error in this timestep because of x <- 2
+print x // should error in this timestep because of x <- 2

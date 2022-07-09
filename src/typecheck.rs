@@ -1,7 +1,6 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::iter;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast::{self, type_of_typedexpr};
 use crate::errors::{self, CompileTimeError, ConstrainError};
@@ -157,10 +156,9 @@ impl TypeContext {
     }
 }
 
-pub fn calculate_hash<T: Hash>(t: &T) -> u64 {
-    let mut s = DefaultHasher::new();
-    t.hash(&mut s);
-    s.finish()
+fn get_id() -> usize {
+    static COUNTER: AtomicUsize = AtomicUsize::new(1);
+    COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 pub fn get_most_immediate_type(temps: &Vec<types::TemporalType>) -> Option<types::TemporalType> {
@@ -217,7 +215,7 @@ pub fn infer_expr(
     e: ast::Expr,
     ctx: &mut TypeContext,
     until_dependencies: &mut types::UntilDependencies,
-    udep_map: &mut HashMap<u64, ast::TypedExpr>,
+    udep_map: &mut HashMap<usize, ast::TypedExpr>,
 ) -> Result<ast::TypedExpr, errors::CompileTimeError> {
     use ast::Expr;
     use ast::TypedExpr;
@@ -239,10 +237,36 @@ pub fn infer_expr(
 
             match b {
                 Binop::Plus | Binop::Minus | Binop::Times | Binop::Div => {
-                    // temporal type is not (necessarily) encoded in arithmetic expression.
-                    //     thus, perhaps `let ty1 = types::Type(Nil, SimpleType::Int)`?
-                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Int);
-                    let ty2 = Type(temporal_undefined.clone(), SimpleType::Int);
+                    let simpl1 = match type_of_typedexpr(operand1.clone()).get_simpl() {
+                        SimpleType::Int => SimpleType::Int,
+                        SimpleType::Float => SimpleType::Float,
+                        SimpleType::Option(a) => {
+                            SimpleType::Option(Box::new(match types::boil_simple(*a) {
+                                SimpleType::Int => SimpleType::Int,
+                                SimpleType::Float => SimpleType::Float,
+                                SimpleType::Undefined => SimpleType::Undefined,
+                                _ => SimpleType::Bottom,
+                            }))
+                        }
+                        SimpleType::Undefined => SimpleType::Undefined,
+                        _ => SimpleType::Bottom,
+                    };
+                    let simpl2 = match type_of_typedexpr(operand2.clone()).get_simpl() {
+                        SimpleType::Int => SimpleType::Int,
+                        SimpleType::Float => SimpleType::Float,
+                        SimpleType::Option(a) => {
+                            SimpleType::Option(Box::new(match types::boil_simple(*a) {
+                                SimpleType::Int => SimpleType::Int,
+                                SimpleType::Float => SimpleType::Float,
+                                SimpleType::Undefined => SimpleType::Undefined,
+                                _ => SimpleType::Bottom,
+                            }))
+                        }
+                        SimpleType::Undefined => SimpleType::Undefined,
+                        _ => SimpleType::Bottom,
+                    };
+                    let ty1 = Type(temporal_undefined.clone(), simpl1.clone());
+                    let ty2 = Type(temporal_undefined.clone(), simpl2.clone());
                     let op1 = ast::new_texpr(
                         operand1,
                         ty1,
@@ -256,9 +280,30 @@ pub fn infer_expr(
                             .to_string(),
                     )?;
 
-                    // add up until_dependencies
+                    let simpl = match (
+                        types::boil_simple(simpl1.clone()),
+                        types::boil_simple(simpl2.clone()),
+                    ) {
+                        (SimpleType::Option(_), _) | (_, SimpleType::Option(_)) => {
+                            panic!("Boiling still gave an Option SimpleType??")
+                        }
+                        (SimpleType::Float, SimpleType::Float)
+                        | (SimpleType::Float, SimpleType::Int)
+                        | (SimpleType::Int, SimpleType::Float) => SimpleType::Float,
+                        (SimpleType::Int, SimpleType::Int) => {
+                            if b == Binop::Div {
+                                SimpleType::Float
+                            } else {
+                                SimpleType::Int
+                            }
+                        }
+                        (SimpleType::Undefined, _) | (_, SimpleType::Undefined) => {
+                            SimpleType::Undefined
+                        }
+                        _ => SimpleType::Bottom,
+                    };
 
-                    let t = Type(temporal_undefined, SimpleType::Int);
+                    let t = Type(temporal_undefined, simpl);
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
                 }
                 Binop::Or => {
@@ -304,8 +349,10 @@ pub fn infer_expr(
                     )?;
                     let ty2 = Type(temporal_undefined, SimpleType::Bool);
                     let op2 = ast::new_texpr(operand2, ty2, "Right operand of Until should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
-                    until_dependencies.weak.push(calculate_hash(&op2));
-                    udep_map.insert(calculate_hash(&op2), op2.clone());
+
+                    let id: usize = get_id();
+                    until_dependencies.weak.push(id);
+                    udep_map.insert(id, op2.clone());
 
                     let t = ast::type_of_typedexpr(op1.clone());
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
@@ -321,8 +368,10 @@ pub fn infer_expr(
                     )?;
                     let ty2 = Type(temporal_undefined, SimpleType::Bool);
                     let op2 = ast::new_texpr(operand2, ty2, "Right operand of SUntil should have type 'until bool'. Basically a thunk if it has free variables...".to_string())?;
-                    until_dependencies.strong.push(calculate_hash(&op2));
-                    udep_map.insert(calculate_hash(&op2), op2.clone());
+
+                    let id: usize = get_id();
+                    until_dependencies.strong.push(id);
+                    udep_map.insert(id, op2.clone());
 
                     let t = ast::type_of_typedexpr(op1.clone());
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
@@ -334,6 +383,7 @@ pub fn infer_expr(
             let t = match c {
                 Const::Bool(_) => Type(temporal_undefined, SimpleType::Bool),
                 Const::Number(_) => Type(temporal_undefined, SimpleType::Int),
+                Const::Float(_) => Type(temporal_undefined, SimpleType::Float),
             };
             Ok(TypedExpr::TEConst(c, t))
         }
@@ -342,11 +392,21 @@ pub fn infer_expr(
             let operand1 = infer_expr(*e1, ctx, until_dependencies, udep_map)?;
             match u {
                 Unop::Neg => {
-                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Int);
+                    let simpl1 =
+                        match types::boil_simple(type_of_typedexpr(operand1.clone()).get_simpl()) {
+                            SimpleType::Option(_) => {
+                                panic!("Boiling still gave an Option SimpleType??")
+                            }
+                            SimpleType::Int => SimpleType::Int,
+                            SimpleType::Float => SimpleType::Float,
+                            SimpleType::Undefined => SimpleType::Undefined,
+                            _ => SimpleType::Bottom,
+                        };
+                    let ty1 = Type(temporal_undefined.clone(), simpl1);
                     let op1 = ast::new_texpr(
                         operand1,
                         ty1,
-                        "Neg operator only works on integers.".to_string(),
+                        "Neg operator only works on numerics.".to_string(),
                     )?;
 
                     let t = Type(temporal_undefined, SimpleType::Int);
@@ -542,7 +602,7 @@ pub fn infer_expr(
 pub fn infer_command(
     cmd: ast::Command,
     ctx: &mut TypeContext,
-    udep_map: &mut HashMap<u64, ast::TypedExpr>,
+    udep_map: &mut HashMap<usize, ast::TypedExpr>,
 ) -> Result<ast::TypedCommand, errors::CompileTimeError> {
     /*
         look into doc-strings
@@ -774,7 +834,7 @@ pub fn dupe_check(block: Vec<ast::Command>) -> Result<(), errors::AssignError> {
 pub fn infer_timeblock(
     block: Vec<ast::Command>,
     ctx: &mut TypeContext,
-    udep_map: &mut HashMap<u64, ast::TypedExpr>,
+    udep_map: &mut HashMap<usize, ast::TypedExpr>,
 ) -> Result<ast::TypedTimeBlock, errors::CompileTimeError> {
     let cmds: Result<ast::TypedTimeBlock, _> = block
         .iter()
@@ -939,7 +999,7 @@ pub fn infer_program(program: ast::Program) -> Result<ast::TypedProgram, errors:
         clock: 0,
     };
 
-    let mut udep_map: HashMap<u64, ast::TypedExpr> = HashMap::new();
+    let mut udep_map: HashMap<usize, ast::TypedExpr> = HashMap::new();
 
     // don't filter out empty blocks since `---\n---` is valid.
     let time_blocks: Vec<_> = program

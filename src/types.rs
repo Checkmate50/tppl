@@ -3,7 +3,7 @@ use crate::errors;
 #[derive(Clone, PartialEq, Hash, Debug)]
 pub enum SimpleType {
     Bool,
-    // Float,
+    Float,
     Int,
     // Pdf,
     Predicate(Vec<Box<SimpleType>>, Box<SimpleType>),
@@ -13,6 +13,7 @@ pub enum SimpleType {
     // Note: `ast::new_texpr` handles `Option(x) = false | x_instance`
     Option(Box<SimpleType>), // these remind me of Python's Options atp. It isn't used as a tagged-sum.
     Undefined,
+    Bottom,
 }
 
 impl SimpleType {
@@ -69,8 +70,8 @@ pub enum TemporalPersistency {
 
 #[derive(Clone, PartialEq, Hash, Debug)]
 pub struct UntilDependencies {
-    pub weak: Vec<u64>,
-    pub strong: Vec<u64>,
+    pub weak: Vec<usize>,
+    pub strong: Vec<usize>,
 }
 
 impl UntilDependencies {
@@ -179,6 +180,9 @@ pub fn resolve_simple_conflicts(
     b: SimpleType,
 ) -> Result<SimpleType, errors::SimpleConflictError> {
     match (a.clone(), b.clone()) {
+        (SimpleType::Bottom, _) | (_, SimpleType::Bottom) => Err(errors::SimpleConflictError {
+            message: "Bottom SimpleType can't be resolved".to_string(),
+        })?,
         (_, SimpleType::Undefined) => Ok(a),
         (SimpleType::Undefined, _) => Ok(b),
         (SimpleType::Option(a), b) => resolve_simple_conflicts(*a, b),
@@ -207,6 +211,9 @@ pub fn constrain(ty: &Type, con_ty: &Type, msg: String) -> Result<Type, errors::
     let Type(temp2, simp2) = con_ty;
 
     let simp: SimpleType = match (simp1, simp2) {
+        (SimpleType::Bottom, _) | (_, SimpleType::Bottom) => Err(errors::ConstrainError {
+            message: msg.clone(),
+        })?,
         (SimpleType::Undefined, b) => b.to_owned(),
         (a, SimpleType::Undefined) => a.to_owned(),
         (SimpleType::Option(a), b) => constrain(
@@ -271,4 +278,11 @@ pub fn constrain(ty: &Type, con_ty: &Type, msg: String) -> Result<Type, errors::
     };
 
     Ok(Type(temp.to_owned(), simp))
+}
+
+pub fn boil_simple(t: SimpleType) -> SimpleType {
+    match t {
+        SimpleType::Option(a) => boil_simple(*a),
+        _ => t,
+    }
 }

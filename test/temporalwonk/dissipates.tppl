@@ -1,0 +1,6 @@
+y <.. false
+x = 3 <!> y
+print x // 3
+---
+y = true
+print x

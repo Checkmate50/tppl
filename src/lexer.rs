@@ -21,6 +21,7 @@ pub enum Token {
     PRINT,
     Op(String),
     Number(String),
+    Float(String),
     Var(String),
     COMMENT,
     COMMA,
@@ -41,6 +42,7 @@ impl fmt::Display for Token {
             Token::PRINT => write!(f, "print"),
             Token::Op(s) => write!(f, "Op {}", s),
             Token::Number(n) => write!(f, "Num {}", n),
+            Token::Float(fl) => write!(f, "Num {}", fl),
             Token::Var(s) => write!(f, "Var {}", s),
             Token::LPAREN => write!(f, "("),
             Token::RPAREN => write!(f, ")"),
@@ -53,10 +55,13 @@ impl fmt::Display for Token {
 // Boring old lexer stuff
 // https://github.com/zesterer/chumsky/blob/master/examples/nano_rust.rs is pretty much copied tbch
 pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + Clone {
-    let num = text::int(10)
-        .chain::<char, _, _>(just('.').chain(text::digits(10)).or_not().flatten())
-        .collect::<String>()
+    let integer = text::int(10)
         .map(Token::Number);
+
+    let floating = text::int(10)
+        .chain::<char, _, _>(just('.').chain(text::digits(10)))
+        .collect::<String>()
+        .map(Token::Float);
 
     // Before the op set for THREEDASH
     let multiop = just("\n")
@@ -97,8 +102,8 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
         .ignored()
         .to(Token::COMMENT);
 
-    let token = num
-        .or(num)
+    let token = floating
+        .or(integer)
         .or(comment)
         .or(multiop)
         .or(op)

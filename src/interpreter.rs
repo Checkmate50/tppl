@@ -26,7 +26,7 @@ pub struct VarContext {
     */
     pub until_dependencies_tracker: HashMap<Var, HashMap<Var, Count>>,
     // key is `hash(texpr)` and value is `texpr`
-    pub udep_map: HashMap<u64, TypedExpr>,
+    pub udep_map: HashMap<usize, TypedExpr>,
     pub clock: i32,
 }
 
@@ -248,7 +248,7 @@ impl VarContext {
             until_dependencies
                 .weak
                 .iter()
-                .map(|hash_val| self.udep_map.get(hash_val).unwrap().to_owned())
+                .map(|id| self.udep_map.get(id).unwrap().to_owned())
                 .map(free_vars_of_texpr)
                 .flatten(),
         );
@@ -256,7 +256,7 @@ impl VarContext {
             until_dependencies
                 .strong
                 .iter()
-                .map(|hash_val| self.udep_map.get(hash_val).unwrap().to_owned())
+                .map(|id| self.udep_map.get(id).unwrap().to_owned())
                 .map(free_vars_of_texpr)
                 .flatten(),
         );
@@ -367,6 +367,7 @@ pub fn boolify(texpr: TypedExpr) -> bool {
         TypedExpr::TEConst(c, _) => match c {
             ast::Const::Bool(b) => b,
             ast::Const::Number(_) => panic!("Truthy-falsey not implemented yet for integers."),
+            ast::Const::Float(_) => panic!("Truthy-falsey not implemented yet for floats."),
         },
         _ => panic!("Truthy-falsey not implemented yet for non-constants."),
     }
@@ -377,6 +378,7 @@ pub fn is_success(texpr: TypedExpr) -> bool {
         TypedExpr::TEConst(c, _) => match c {
             ast::Const::Bool(b) => b,
             ast::Const::Number(_) => true,
+            ast::Const::Float(_) => true,
         },
         _ => panic!("Truthy-falsey not implemented yet for non-constants."),
     }
@@ -530,18 +532,32 @@ pub fn eval_expr(
             let result: Const = match b {
                 Binop::Plus => match (c1, c2.unwrap()) {
                     (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 + n2),
+                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) + f2),
+                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 + (n2 as f64)),
+                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 + f2),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Minus => match (c1, c2.unwrap()) {
                     (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 - n2),
+                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) - f2),
+                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 - (n2 as f64)),
+                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 - f2),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Times => match (c1, c2.unwrap()) {
                     (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 * n2),
+                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) * f2),
+                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 * (n2 as f64)),
+                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 * f2),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Div => match (c1, c2.unwrap()) {
-                    (Const::Number(n1), Const::Number(n2)) => Const::Number((n1 / n2) as i64),
+                    (Const::Number(n1), Const::Number(n2)) => {
+                        Const::Float((n1 as f64) / (n2 as f64))
+                    }
+                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) / f2),
+                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 / (n2 as f64)),
+                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 / f2),
                     _ => panic!("Type-checking failed??"),
                 },
                 Binop::Until | Binop::SUntil => match (c1.clone(), c2.clone().unwrap()) {
@@ -612,10 +628,12 @@ pub fn eval_expr(
                 Unop::Neg => match c {
                     Const::Bool(_) => panic!("Type-checking failed??"),
                     Const::Number(n) => Const::Number(-n),
+                    Const::Float(f) => Const::Float(-f),
                 },
                 Unop::Not => match c {
                     Const::Bool(b) => Const::Bool(!b),
                     Const::Number(_) => panic!("Type-checking failed??"),
+                    Const::Float(_) => panic!("Type-checking failed??"),
                 },
             };
             let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
@@ -805,6 +823,11 @@ pub fn exec_command(
                     "Print({}) => {}",
                     ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)),
                     n
+                ),
+                ast::Const::Float(f) => println!(
+                    "Print({}) => {}",
+                    ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)),
+                    f
                 ),
             };
             Ok(())
