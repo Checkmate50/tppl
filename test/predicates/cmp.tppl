@@ -1,0 +1,33 @@
+print lt(2, 3) // true
+print lt(2, 2) // false
+print lt(2, 1) // false
+
+print gt(2, 3) // false
+print gt(2, 2) // false
+print gt(2, 1) // true
+
+print lte(2, 3) // true
+print lte(2, 2) // true
+print lte(2, 1) // false
+
+print gte(2, 3) // false
+print gte(2, 2) // true
+print gte(2, 1) // true
+
+print eq(2, 3) // false
+print eq(2, 2) // true
+print eq(2, 1) // false
+
+print neq(2, 3) // true
+print neq(2, 2) // false
+print neq(2, 1) // true
+
+print eq(true, true) // true
+print eq(true, false) // false
+print eq(false, true) // false
+print eq(false, false) // true
+
+print neq(true, true) // false
+print neq(true, false) // true
+print neq(false, true) // true
+print neq(false, false) // false

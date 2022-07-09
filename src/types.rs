@@ -10,6 +10,7 @@ pub enum SimpleType {
     // currently, `interpreters::run_predicate_definitions` doesn't use `Option` in its fullness.
     // It first checks if it's correct (ie. a "Some"). Then, it does type-checking.
     // Failure is handled without using `Option` since `interpreters::is_success` pattern matches on texpr (ignoring type).
+    // Note: `ast::new_texpr` handles `Option(x) = false | x_instance`
     Option(Box<SimpleType>), // these remind me of Python's Options atp. It isn't used as a tagged-sum.
     Undefined,
 }
@@ -180,17 +181,20 @@ pub fn resolve_simple_conflicts(
     match (a.clone(), b.clone()) {
         (_, SimpleType::Undefined) => Ok(a),
         (SimpleType::Undefined, _) => Ok(b),
-        (SimpleType::Option(a), b) if *a == b => Ok(b),
-        (a, SimpleType::Option(b)) if a == *b => Ok(a),
-        (SimpleType::Predicate(arg_ts1, ret1), SimpleType::Predicate(arg_ts2, ret2))=> {
+        (SimpleType::Option(a), b) => resolve_simple_conflicts(*a, b),
+        (a, SimpleType::Option(b)) => resolve_simple_conflicts(a, *b),
+        (SimpleType::Predicate(arg_ts1, ret1), SimpleType::Predicate(arg_ts2, ret2)) => {
             let arg_ts: Result<Vec<SimpleType>, errors::SimpleConflictError> = arg_ts1
                 .into_iter()
                 .zip(arg_ts2.into_iter())
                 .map(|(a, b)| resolve_simple_conflicts(*a, *b))
                 .collect();
             let arg_ts: Vec<Box<SimpleType>> = arg_ts?.into_iter().map(|s| Box::new(s)).collect();
-            Ok(SimpleType::Predicate(arg_ts, Box::new(resolve_simple_conflicts(*ret1, *ret2)?)))
-        },
+            Ok(SimpleType::Predicate(
+                arg_ts,
+                Box::new(resolve_simple_conflicts(*ret1, *ret2)?),
+            ))
+        }
         (a, b) if a == b => Ok(a),
         _ => Err(errors::SimpleConflictError {
             message: format!("Types {:?}\nand {:?}\ncannot be resolved.", a, b).to_string(),

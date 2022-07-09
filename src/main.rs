@@ -2,6 +2,7 @@ use chumsky::{prelude::*, Stream};
 use std::{env, fs};
 mod ast;
 mod ast_printer;
+pub mod builtins;
 pub mod errors;
 pub mod interpreter;
 mod lexer;

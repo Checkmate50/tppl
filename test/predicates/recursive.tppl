@@ -1,0 +1,5 @@
+succ(x) = x + 1
+ten(x) = gte(x, 10) & x
+ten(x) = lt(x, 10) & ten(succ(x))
+
+print ten(1) // 10

@@ -1,14 +1,13 @@
-// pub(crate) type InferResult<T> = Result<T, ()>;
-
-// #[derive(Debug, Clone)]
-// pub struct ConstrainError;
-// impl fmt::Display for ConstrainError {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "couldn't constrain types")
-//     }
-// }
+#[derive(Debug)]
+pub struct BuiltinNameConflictError {
+    pub message: String,
+}
 #[derive(Debug)]
 pub struct CyclicalUntilDependency {
+    pub message: String,
+}
+#[derive(Debug)]
+pub struct PredicateExprError {
     pub message: String,
 }
 #[derive(Debug)]
@@ -83,6 +82,7 @@ pub enum ExecutionTimeError {
     Input(InputError),
     Until(UntilVoidError),
     SUntil(SUntilConditionUnsatisfied),
+    Access(AccessError),
 }
 #[derive(Debug)]
 pub enum PredError {
@@ -109,13 +109,20 @@ pub enum AssignError {
     Recursive(RecursiveAssignError),
     Circular(CircularAssignError),
     Cyclical(CyclicalUntilDependency),
+    BuiltIn(BuiltinNameConflictError),
+}
+#[derive(Debug)]
+pub enum AccessError {
+    Name(NameError),
+    PredExpr(PredicateExprError),
 }
 #[derive(Debug)]
 pub enum CompileTimeError {
     Type(TypeError),
     Assign(AssignError),
-    Access(NameError),
+    Access(AccessError),
 }
+
 impl From<InferError> for TypeError {
     fn from(e: InferError) -> Self {
         TypeError::Infer(e)
@@ -156,9 +163,39 @@ impl From<AssignError> for CompileTimeError {
         CompileTimeError::Assign(e)
     }
 }
+impl From<PredicateExprError> for AccessError {
+    fn from(e: PredicateExprError) -> Self {
+        AccessError::PredExpr(e)
+    }
+}
+impl From<PredicateExprError> for CompileTimeError {
+    fn from(e: PredicateExprError) -> Self {
+        CompileTimeError::Access(AccessError::PredExpr(e))
+    }
+}
+impl From<AccessError> for CompileTimeError {
+    fn from(e: AccessError) -> Self {
+        CompileTimeError::Access(e)
+    }
+}
+impl From<AccessError> for ExecutionTimeError {
+    fn from(e: AccessError) -> Self {
+        ExecutionTimeError::Access(e)
+    }
+}
+impl From<PredicateExprError> for ExecutionTimeError {
+    fn from(e: PredicateExprError) -> Self {
+        ExecutionTimeError::Access(AccessError::PredExpr(e))
+    }
+}
+impl From<NameError> for AccessError {
+    fn from(e: NameError) -> Self {
+        AccessError::Name(e)
+    }
+}
 impl From<NameError> for CompileTimeError {
     fn from(e: NameError) -> Self {
-        CompileTimeError::Access(e)
+        CompileTimeError::Access(AccessError::Name(e))
     }
 }
 impl From<CircularAssignError> for CompileTimeError {
@@ -289,5 +326,20 @@ impl From<ImproperCallError> for CompileTimeError {
 impl From<PredError> for ExecutionTimeError {
     fn from(e: PredError) -> Self {
         ExecutionTimeError::Predicate(e)
+    }
+}
+impl From<BuiltinNameConflictError> for AssignError {
+    fn from(e: BuiltinNameConflictError) -> Self {
+        AssignError::BuiltIn(e)
+    }
+}
+impl From<BuiltinNameConflictError> for CompileTimeError {
+    fn from(e: BuiltinNameConflictError) -> Self {
+        CompileTimeError::Assign(AssignError::BuiltIn(e))
+    }
+}
+impl From<BuiltinNameConflictError> for ExecutionTimeError {
+    fn from(e: BuiltinNameConflictError) -> Self {
+        ExecutionTimeError::Assign(AssignError::BuiltIn(e))
     }
 }

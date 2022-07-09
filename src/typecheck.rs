@@ -5,7 +5,7 @@ use std::iter;
 
 use crate::ast::{self, type_of_typedexpr};
 use crate::errors::{self, CompileTimeError, ConstrainError};
-use crate::types;
+use crate::{builtins, types};
 use ast::Var;
 
 use petgraph::algo::toposort;
@@ -24,6 +24,16 @@ pub struct TypeContext {
 impl TypeContext {
     // gives type of variable name.
     pub fn look_up(&mut self, var_name: &Var) -> Result<types::Type, errors::CompileTimeError> {
+        if builtins::is_builtin(var_name) {
+            Err(errors::PredicateExprError {
+                message: format!(
+                    "Name {} is taken by a builtin predicate. No need to internally look it up.",
+                    var_name
+                )
+                .to_string(),
+            })?
+        }
+
         if let Some((temps, simpl)) = self.vars.get(var_name) {
             if filter_out_nexts(temps).len() == 0 {
                 Err(errors::NameError {
@@ -79,6 +89,16 @@ impl TypeContext {
         var_name: &Var,
         data: types::Type,
     ) -> Result<(), errors::CompileTimeError> {
+        if builtins::is_builtin(var_name) {
+            Err(errors::BuiltinNameConflictError {
+                message: format!(
+                    "Name {} can't be assigned to since it's the name of a built-in predicate.",
+                    var_name
+                )
+                .to_string(),
+            })?
+        }
+
         let types::Type(cand_temp, cand_simpl) = data;
         if let Some((temps, simpl)) = self.vars.clone().get(var_name) {
             let simpl = types::resolve_simple_conflicts(simpl.to_owned(), cand_simpl)?;
@@ -241,7 +261,7 @@ pub fn infer_expr(
                     let t = Type(temporal_undefined, SimpleType::Int);
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
                 }
-                Binop::Or | Binop::And => {
+                Binop::Or => {
                     // todo: negation as failure?
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
                     let op1 = ast::new_texpr(
@@ -256,7 +276,24 @@ pub fn infer_expr(
                     // let t = Type(temporal_undefined, SimpleType::Bool);
                     let t = type_of_typedexpr(op2.clone());
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
-                }
+                },
+                Binop::And => {
+                    // todo: negation as failure?
+                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
+                    let op1 = ast::new_texpr(
+                        operand1,
+                        ty1,
+                        "Left operand of a logical operator must be a boolean.".to_string(),
+                    )?;
+                    let op2 = operand2;
+                    let Type(temp, simpl) = type_of_typedexpr(op2.clone());
+                    let t = if simpl.is_option() {
+                        Type(temp, simpl)
+                    } else {
+                        Type(temp, SimpleType::Option(Box::new(simpl)))
+                    };
+                    Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
+                },
                 Binop::Until => {
                     // todo: truthiness
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Undefined);
@@ -330,7 +367,20 @@ pub fn infer_expr(
             }
         }
         Expr::EVar(s) => {
+            if builtins::is_builtin(&s) {
+                Err(errors::PredicateExprError {
+                    message: format!("Tried to access builtin predicate {}. FOL!", s).to_string(),
+                })?
+            }
+
             let named_type = ctx.look_up(&s)?;
+
+            if named_type.get_simpl().is_predicate() {
+                Err(errors::PredicateExprError {
+                    message: format!("Tried to access predicate {}. FOL!", s).to_string(),
+                })?
+            }
+
             if types::is_currently_available(&named_type.get_temporal()) {
                 Ok(TypedExpr::TEVar(
                     s,
@@ -347,43 +397,66 @@ pub fn infer_expr(
             types::SimpleType::Int,
         ))),
         Expr::ECall(name, args) => {
-            let Type(_, pred_simpl) = ctx.look_up(&name)?;
-            if let SimpleType::Predicate(args_ts, ret) = pred_simpl {
-                // temporal type of arguments. these can't be temporally `undefined`, which `infer_expr` would blindly give.
-                // we need to simulate `=` assignment in `local_context`.
-                let temporal_ty_arg = TemporalType {
-                    when_available: types::TemporalAvailability::Current,
-                    when_dissipates: types::TemporalPersistency::Always,
-                    is_until: None,
-                };
+            // temporal type of arguments. these can't be temporally `undefined`, which `infer_expr` would blindly give.
+            // we need to simulate `=` assignment in `local_context`.
+            let temporal_ty_arg = TemporalType {
+                when_available: types::TemporalAvailability::Current,
+                when_dissipates: types::TemporalPersistency::Always,
+                is_until: None,
+            };
 
-                let typed_args: Result<Vec<TypedExpr>, CompileTimeError> = args
+            let typed_args: Result<Vec<TypedExpr>, CompileTimeError> = args
+                .into_iter()
+                .map(|e| infer_expr(e, ctx, until_dependencies, udep_map))
+                .collect();
+
+            if builtins::is_builtin(&name) {
+                let typed_args = typed_args?;
+                let simpls: Vec<SimpleType> = typed_args
+                    .clone()
                     .into_iter()
-                    .map(|e| infer_expr(e, ctx, until_dependencies, udep_map))
+                    .map(|texpr| ast::type_of_typedexpr(texpr).get_simpl())
                     .collect();
-                let typed_args: Result<Vec<TypedExpr>, ConstrainError> = typed_args?
-                    .into_iter().zip(args_ts.into_iter())
-                    .map(|(texpr, arg_simpl)| {
-                        ast::new_texpr(
-                            texpr,
-                            Type(temporal_ty_arg.clone(), *arg_simpl),
-                            "Somehow `typecheck::infer_expr` didn't give `Type(Temp:Und, Simpl::Arg's)`"
-                                .to_string(),
-                        )
-                    })
-                    .collect();
+                let ret: SimpleType = builtins::typecheck_builtin_cmp(name.clone(), simpls)?;
                 Ok(TypedExpr::TECall(
                     name,
-                    typed_args?,
-                    Type(temporal_undefined, *ret),
+                    typed_args,
+                    Type(temporal_undefined, ret),
                 ))
             } else {
-                Err(errors::ImproperCallError {
-                    message: format!("Attempted to call a non-predicate {}", name).to_string(),
-                })?
+                let Type(_, pred_simpl) = ctx.look_up(&name)?;
+                if let SimpleType::Predicate(params_ts, ret) = pred_simpl {
+                    let constrained_typed_args: Result<Vec<TypedExpr>, ConstrainError> = typed_args?
+                        .into_iter().zip(params_ts.into_iter())
+                        .map(|(texpr, arg_simpl)| {
+                            ast::new_texpr(
+                                texpr,
+                                Type(temporal_ty_arg.clone(), *arg_simpl),
+                                "Somehow `typecheck::infer_expr` didn't give `Type(Temp:Und, Simpl::Arg's)`"
+                                    .to_string(),
+                            )
+                        })
+                        .collect();
+                    Ok(TypedExpr::TECall(
+                        name,
+                        constrained_typed_args?,
+                        Type(temporal_undefined, *ret),
+                    ))
+                } else {
+                    Err(errors::ImproperCallError {
+                        message: format!("Attempted to call a non-predicate {}", name).to_string(),
+                    })?
+                }
             }
         }
         Expr::EPred(name, params, body) => {
+            if builtins::is_builtin(&name) {
+                Err(errors::PredicateExprError {
+                    message: "Predicates that share a name with a builtin cannot be created."
+                        .to_string(),
+                })?
+            }
+
             // temporal type of parameters
             let temporal_ty_param = TemporalType {
                 when_available: types::TemporalAvailability::Current,
@@ -404,13 +477,16 @@ pub fn infer_expr(
             let is_first_time = !ctx.vars.contains_key(&name);
             if is_first_time {
                 // insert predicate name into local
-                local_context.add_name(&name, Type(
-                    // temporalness is assumed to be like `temporal_ty_param`.
-                    // At run-time, the temporalness depends on the assignment operator, but that can be handled then.
-                    // This is just meant to infer the body anyways.
-                    temporal_ty_param.clone(),
-                    SimpleType::Predicate(arg_types.clone(), Box::new(SimpleType::Undefined)),
-                ))?;
+                local_context.add_name(
+                    &name,
+                    Type(
+                        // temporalness is assumed to be like `temporal_ty_param`.
+                        // At run-time, the temporalness depends on the assignment operator, but that can be handled then.
+                        // This is just meant to infer the body anyways.
+                        temporal_ty_param.clone(),
+                        SimpleType::Predicate(arg_types.clone(), Box::new(SimpleType::Undefined)),
+                    ),
+                )?;
             }
             // insert parameters into local
             for param in params.iter() {
@@ -423,27 +499,32 @@ pub fn infer_expr(
 
             // intial inference
             if is_first_time {
-                let typed_body = infer_expr(*body.clone(), &mut local_context, until_dependencies, udep_map)?;
+                let typed_body = infer_expr(
+                    *body.clone(),
+                    &mut local_context,
+                    until_dependencies,
+                    udep_map,
+                )?;
                 // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
                 // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
                 let simpl_return_type =
                     SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
-                
-                local_context.add_name(&name, Type(
-                    temporal_ty_param.clone(),
-                    SimpleType::Predicate(arg_types.clone(), Box::new(simpl_return_type)),
-                ))?;
+
+                local_context.add_name(
+                    &name,
+                    Type(
+                        temporal_ty_param.clone(),
+                        SimpleType::Predicate(arg_types.clone(), Box::new(simpl_return_type)),
+                    ),
+                )?;
             }
-            
+
             let typed_body = infer_expr(*body, &mut local_context, until_dependencies, udep_map)?;
 
             // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
             // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
             let simpl_return_type =
                 SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
-
-            
-
 
             Ok(TypedExpr::TEPred(
                 name,

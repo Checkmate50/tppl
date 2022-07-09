@@ -1,21 +1,14 @@
 use std::cmp::Eq;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::iter;
 
-use crate::ast;
 use crate::ast::type_of_typedexpr;
-use crate::errors;
-use crate::errors::ExecutionTimeError;
-use crate::errors::ImproperCallError;
+use crate::{errors, ast_printer};
 use crate::types;
-use ast::TypedCommand;
-use ast::TypedExpr;
-use ast::Var;
-use types::SimpleType;
-use types::TemporalType;
-use types::Type;
+use crate::{ast, builtins};
+use ast::{TypedCommand, TypedExpr, Var};
+use types::{SimpleType, TemporalType, Type};
 
 pub type Value = (Type, TypedExpr);
 
@@ -33,12 +26,22 @@ pub struct VarContext {
     */
     pub until_dependencies_tracker: HashMap<Var, HashMap<Var, Count>>,
     // key is `hash(texpr)` and value is `texpr`
-    pub udep_map: HashMap<u64, ast::TypedExpr>,
+    pub udep_map: HashMap<u64, TypedExpr>,
     pub clock: i32,
 }
 
 impl VarContext {
     pub fn look_up(&mut self, var_name: &Var) -> Result<Vec<Value>, errors::ExecutionTimeError> {
+        if builtins::is_builtin(var_name) {
+            Err(errors::PredicateExprError {
+                message: format!(
+                    "Name {} is taken by a builtin predicate. No need to internally look it up.",
+                    var_name
+                )
+                .to_string(),
+            })?
+        }
+
         if let Some((temp_texpr_pairs, simpl)) = self.vars.get(var_name) {
             if filter_out_nexts(temp_texpr_pairs).len() == 0 {
                 Err(errors::CurrentlyUnavailableError {
@@ -53,7 +56,7 @@ impl VarContext {
                     if let Some(temps) = sort_texprs_by_immediacy(temp_texpr_pairs) {
                         let values: Vec<Value> = temps
                             .into_iter()
-                            .map(|(temp, texpr)| (types::Type(temp, simpl.clone()), texpr))
+                            .map(|(temp, texpr)| (Type(temp, simpl.clone()), texpr))
                             .collect();
 
                         Ok(values)
@@ -68,7 +71,7 @@ impl VarContext {
                     }
                 } else {
                     if let Some((temp, texpr)) = get_most_immediate_texpr(temp_texpr_pairs) {
-                        Ok([(types::Type(temp, simpl.to_owned()), texpr)].to_vec())
+                        Ok([(Type(temp, simpl.to_owned()), texpr)].to_vec())
                     } else {
                         Err(errors::CurrentlyUnavailableError {
                             message: format!(
@@ -93,7 +96,16 @@ impl VarContext {
         data: &TypedExpr,
         typ: &Type,
     ) -> Result<(), errors::ExecutionTimeError> {
-        println!("added {}", var_name);
+        if builtins::is_builtin(var_name) {
+            Err(errors::BuiltinNameConflictError {
+                message: format!(
+                    "Name {} can't be assigned to since it's the name of a built-in predicate.",
+                    var_name
+                )
+                .to_string(),
+            })?
+        }
+
         if let Some((temp_texpr_pairs, simpl)) = self.vars.clone().get(var_name) {
             let mut temp_texpr_pairs = temp_texpr_pairs.clone();
 
@@ -134,13 +146,6 @@ impl VarContext {
         Ok(())
     }
 
-    // fn get_from_vars(vars : &HashMap<Var, (Vec<(TemporalType, TypedExpr)>, SimpleType)>, name: &Var) -> Option<(Vec<(TemporalType, TypedExpr)>, SimpleType)> {
-    //     match vars.get(name) {
-    //         Some(x) => Some(x.to_owned()),
-    //         None => None
-    //     }
-    // }
-
     fn get_from_hashmap<'a, K: Hash + Eq, V>(hm: &'a HashMap<K, V>, key: &'a K) -> Option<&'a V> {
         match hm.get(key) {
             Some(x) => Some(x),
@@ -173,17 +178,6 @@ impl VarContext {
                                 (temp.to_owned(), texpr.to_owned()),
                             )?;
                         }
-
-                        // for until_cond in until_conds.strong.iter().chain(until_conds.weak.iter()) {
-                        //     let cond_texpr = Self::get_from_hashmap(&self.udep_map, until_cond).unwrap();
-                        //     let res = eval_expr(cond_texpr.to_owned(), self)?;
-                        //     if boolify(res) {
-                        //         self.destruct_value(
-                        //             dep_name.clone(),
-                        //             (temp.to_owned(), texpr.to_owned()),
-                        //         )?;
-                        //     }
-                        // }
                     }
                 }
             }
@@ -485,6 +479,8 @@ pub fn eval_expr(
     match e {
         TypedExpr::TEConst(_, _) => Ok(e),
         TypedExpr::TEVar(var_name, t) => {
+            // any `FOL` violations should've been caught at CompileTime.
+
             let values: Vec<Value> = ctx.look_up(&var_name)?;
             let (ty, texpr) = values.get(0).unwrap();
             if types::is_currently_available(&ty.get_temporal()) {
@@ -506,7 +502,13 @@ pub fn eval_expr(
             // `f(x) = x > .3 & g` is illegal if `g : proposition`
             let (c1, c2) = match (eval_expr(*e1, ctx)?, eval_expr(*e2, ctx)?) {
                 (TypedExpr::TEConst(c1, _), TypedExpr::TEConst(c2, _)) => (c1, c2),
-                (a, b) => panic!("{}", format!("Did not receive a constant after evaluation.\n{:?}\n{:?}", a, b)),
+                (a, b) => panic!(
+                    "{}",
+                    format!(
+                        "Did not receive a constant after evaluation.\n{:?}\n{:?}",
+                        a, b
+                    )
+                ),
             };
 
             let result: Const = match b {
@@ -526,8 +528,8 @@ pub fn eval_expr(
                     (Const::Number(n1), Const::Number(n2)) => Const::Number((n1 / n2) as i64),
                     _ => panic!("Type-checking failed??"),
                 },
-                Binop::Or => match (c1.clone(), c2) {
-                    (Const::Bool(b1), c2) => {
+                Binop::Or => match (c1.clone(), c2.clone()) {
+                    (Const::Bool(b1), Const::Bool(_)) => {
                         if b1 {
                             c1
                         } else {
@@ -609,60 +611,70 @@ pub fn eval_expr(
             }
         }
         TypedExpr::TECall(name, args, return_type) => {
-            // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
-            let preds = ctx.look_up(&name)?;
-
-            let currents: Vec<Value> = preds
-                .clone()
-                .into_iter()
-                .filter(|(Type(temp, _), _)| {
-                    temp.when_available == types::TemporalAvailability::Current
-                })
-                .collect();
-            let futures: Vec<Value> = preds
-                .into_iter()
-                .filter(|(Type(temp, _), _)| {
-                    temp.when_available == types::TemporalAvailability::Future
-                })
-                .collect();
-
-
             // this ain't lazy
-            let args: Result<Vec<TypedExpr>, errors::ExecutionTimeError> = args.into_iter().map(|arg| eval_expr(arg, ctx)).collect();
+            let args: Result<Vec<TypedExpr>, errors::ExecutionTimeError> =
+                args.into_iter().map(|arg| eval_expr(arg, ctx)).collect();
             let args: Vec<TypedExpr> = args?;
 
-            let curr_successes = run_predicate_definitions(
-                name.clone(),
-                currents,
-                args.clone(),
-                ctx
-            )?;
-            
-            let invoc_result: Result<TypedExpr, errors::PredError> = if curr_successes.len() == 0 {
-                let futu_successes =
-                    run_predicate_definitions(name, futures, args, ctx)?;
-                if futu_successes.len() == 0 {
-                    Err(errors::NoPredicateError {
-                        message: "No Predicates succeeded".to_string(),
-                    })?
-                } else if futu_successes.len() > 1 {
-                    Err(errors::MultiplePredicateError {
-                        message: "Multiple (future) Predicates succeeded".to_string(),
-                    })?
+            let return_val: Result<TypedExpr, errors::ExecutionTimeError> =
+                if builtins::is_builtin(&name) {
+                    // don't need to constrain/check `return_type` since it's built-in.
+                    Ok(builtins::exec_builtin_cmp(name, args)?)
                 } else {
-                    Ok(futu_successes.get(0).unwrap().to_owned())
-                }
-            } else if curr_successes.len() > 1 {
-                Err(errors::MultiplePredicateError {
-                    message: "Multiple (current) Predicates succeeded".to_string(),
-                })?
-            } else {
-                Ok(curr_successes.get(0).unwrap().to_owned())
-            };
-            Ok(ast::new_texpr(invoc_result?, return_type, "Predicate Invocation didn't return desired type.".to_string())?)
+                    // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
+                    let preds = ctx.look_up(&name)?;
+
+                    let currents: Vec<Value> = preds
+                        .clone()
+                        .into_iter()
+                        .filter(|(Type(temp, _), _)| {
+                            temp.when_available == types::TemporalAvailability::Current
+                        })
+                        .collect();
+                    let futures: Vec<Value> = preds
+                        .into_iter()
+                        .filter(|(Type(temp, _), _)| {
+                            temp.when_available == types::TemporalAvailability::Future
+                        })
+                        .collect();
+
+                    let curr_successes =
+                        run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
+
+                    if curr_successes.len() == 0 {
+                        let futu_successes = run_predicate_definitions(name, futures, args, ctx)?;
+                        if futu_successes.len() == 0 {
+                            Err(errors::NoPredicateError {
+                                message: "No Predicates succeeded".to_string(),
+                            })?
+                        } else if futu_successes.len() > 1 {
+                            Err(errors::MultiplePredicateError {
+                                message: "Multiple (future) Predicates succeeded".to_string(),
+                            })?
+                        } else {
+                            Ok(futu_successes.get(0).unwrap().to_owned())
+                        }
+                    } else if curr_successes.len() > 1 {
+                        Err(errors::MultiplePredicateError {
+                            message: "Multiple (current) Predicates succeeded".to_string(),
+                        })?
+                    } else {
+                        Ok(curr_successes.get(0).unwrap().to_owned())
+                    }
+                };
+            Ok(ast::new_texpr(
+                return_val?,
+                return_type,
+                "Predicate Invocation didn't return desired type.".to_string(),
+            )?)
         }
         TypedExpr::TEPred(name, params, body, t) => {
-            // panic!("FOL! Shouldn't be evaluating propositions.")
+            if builtins::is_builtin(&name) {
+                Err(errors::PredicateExprError {
+                    message: "Predicates that share a name with a builtin cannot be created."
+                        .to_string(),
+                })?
+            }
             Ok(TypedExpr::TEPred(name, params, body, t))
         }
     }
@@ -673,8 +685,7 @@ pub fn run_predicate_definitions(
     definitions: Vec<Value>,
     args: Vec<TypedExpr>,
     ctx: &mut VarContext,
-) -> Result<Vec<TypedExpr>, ExecutionTimeError> {
-
+) -> Result<Vec<TypedExpr>, errors::ExecutionTimeError> {
     let temporal_undefined = TemporalType {
         when_available: types::TemporalAvailability::Undefined,
         when_dissipates: types::TemporalPersistency::Undefined,
@@ -686,9 +697,17 @@ pub fn run_predicate_definitions(
         if let SimpleType::Predicate(arg_ts, ret) = simpl {
             let mut local_context = ctx.clone();
             if let TypedExpr::TEPred(_, params, body, _) = pred {
-                for ((param, arg), arg_t) in params.iter().zip(args.clone().into_iter()).zip(arg_ts.into_iter()) {
+                for ((param, arg), arg_t) in params
+                    .iter()
+                    .zip(args.clone().into_iter())
+                    .zip(arg_ts.into_iter())
+                {
                     local_context.vars.remove(param);
-                    let arg = ast::new_texpr(arg, Type(temporal_undefined.clone(), *arg_t), "Predicate didn't receive expected types of arguments.".to_string())?;
+                    let arg = ast::new_texpr(
+                        arg,
+                        Type(temporal_undefined.clone(), *arg_t),
+                        "Predicate didn't receive expected types of arguments.".to_string(),
+                    )?;
                     local_context.add_var(param, &arg, &type_of_typedexpr(arg.clone()))?;
                 }
 
@@ -705,7 +724,7 @@ pub fn run_predicate_definitions(
                 panic!("There shouldn't be any non-predicates..?")
             }
         } else {
-            Err(ImproperCallError {
+            Err(errors::ImproperCallError {
                 message: format!(
                     "You tried to call {} which isn't a predicate. It's a {:?}",
                     name, simpl
@@ -743,15 +762,14 @@ pub fn exec_command(
             Ok(())
         }
         TypedCommand::TPrint(texpr) => {
-            println!("print........");
             // todo: handle pdfs and propositions when implemented
-            let c = match eval_expr(texpr, ctx)? {
+            let c = match eval_expr(texpr.clone(), ctx)? {
                 TypedExpr::TEConst(c, _) => c,
                 _ => panic!("Evaluation did not result in a constant."),
             };
             match c {
-                ast::Const::Bool(b) => println!("Print => {}", b),
-                ast::Const::Number(n) => println!("Print => {}", n),
+                ast::Const::Bool(b) => println!("Print({}) => {}", ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)), b),
+                ast::Const::Number(n) => println!("Print({}) => {}", ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)), n),
             };
             Ok(())
         }
