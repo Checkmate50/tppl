@@ -4,9 +4,9 @@ use std::hash::Hash;
 use std::iter;
 
 use crate::ast::type_of_typedexpr;
-use crate::{errors, ast_printer};
 use crate::types;
 use crate::{ast, builtins};
+use crate::{ast_printer, errors};
 use ast::{TypedCommand, TypedExpr, Var};
 use types::{SimpleType, TemporalType, Type};
 
@@ -500,55 +500,51 @@ pub fn eval_expr(
             // only desiring constants is gucci since we're only using FOL. Thus, we can't have "propositions as values."
             // Sure, propositions are expressions, but stuff like returning a proposition?
             // `f(x) = x > .3 & g` is illegal if `g : proposition`
-            let (c1, c2) = match (eval_expr(*e1, ctx)?, eval_expr(*e2, ctx)?) {
-                (TypedExpr::TEConst(c1, _), TypedExpr::TEConst(c2, _)) => (c1, c2),
-                (a, b) => panic!(
+            let c1 = match eval_expr(*e1, ctx)? {
+                TypedExpr::TEConst(c1, _) => c1,
+                a => panic!(
                     "{}",
                     format!(
-                        "Did not receive a constant after evaluation.\n{:?}\n{:?}",
-                        a, b
+                        "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                        a
                     )
                 ),
             };
 
+            // `And` is lazy.
+            let c2: Option<Const> = if b.clone() != Binop::And {
+                Some(match eval_expr(*e2.clone(), ctx)? {
+                    TypedExpr::TEConst(c2, _) => c2,
+                    b => panic!(
+                        "{}",
+                        format!(
+                            "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                            b
+                        )
+                    ),
+                })
+            } else {
+                None
+            };
+
             let result: Const = match b {
-                Binop::Plus => match (c1, c2) {
+                Binop::Plus => match (c1, c2.unwrap()) {
                     (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 + n2),
                     _ => panic!("Type-checking failed??"),
                 },
-                Binop::Minus => match (c1, c2) {
+                Binop::Minus => match (c1, c2.unwrap()) {
                     (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 - n2),
                     _ => panic!("Type-checking failed??"),
                 },
-                Binop::Times => match (c1, c2) {
+                Binop::Times => match (c1, c2.unwrap()) {
                     (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 * n2),
                     _ => panic!("Type-checking failed??"),
                 },
-                Binop::Div => match (c1, c2) {
+                Binop::Div => match (c1, c2.unwrap()) {
                     (Const::Number(n1), Const::Number(n2)) => Const::Number((n1 / n2) as i64),
                     _ => panic!("Type-checking failed??"),
                 },
-                Binop::Or => match (c1.clone(), c2.clone()) {
-                    (Const::Bool(b1), Const::Bool(_)) => {
-                        if b1 {
-                            c1
-                        } else {
-                            c2
-                        }
-                    }
-                    _ => panic!("Type-checking failed??"),
-                },
-                Binop::And => match (c1.clone(), c2) {
-                    (Const::Bool(b1), c2) => {
-                        if b1 {
-                            c2
-                        } else {
-                            c1
-                        }
-                    }
-                    _ => panic!("Type-checking failed??"),
-                },
-                Binop::Until | Binop::SUntil => match (c1.clone(), c2) {
+                Binop::Until | Binop::SUntil => match (c1.clone(), c2.clone().unwrap()) {
                     (_, Const::Bool(cond)) => {
                         if cond {
                             Err(errors::UntilVoidError {
@@ -559,7 +555,39 @@ pub fn eval_expr(
                             c1
                         }
                     }
-                    _ => panic!("Not Implemented"),
+                    _ => panic!(
+                        "(S)Until condition should be boolean! Not {:?}",
+                        c2.unwrap()
+                    ),
+                },
+                Binop::Or => match (c1.clone(), c2.clone().unwrap()) {
+                    (Const::Bool(b1), Const::Bool(_)) => {
+                        if b1 {
+                            c1
+                        } else {
+                            c2.unwrap()
+                        }
+                    }
+                    _ => panic!("Type-checking failed??"),
+                },
+                Binop::And => match c1.clone() {
+                    Const::Bool(b1) => {
+                        if b1 {
+                            match eval_expr(*e2, ctx)? {
+                                    TypedExpr::TEConst(c2, _) => c2,
+                                    b => panic!(
+                                        "{}",
+                                        format!(
+                                            "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                            b
+                                        )
+                                    ),
+                                }
+                        } else {
+                            c1
+                        }
+                    }
+                    _ => panic!("Type-checking failed??"),
                 },
             };
 
@@ -768,8 +796,16 @@ pub fn exec_command(
                 _ => panic!("Evaluation did not result in a constant."),
             };
             match c {
-                ast::Const::Bool(b) => println!("Print({}) => {}", ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)), b),
-                ast::Const::Number(n) => println!("Print({}) => {}", ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)), n),
+                ast::Const::Bool(b) => println!(
+                    "Print({}) => {}",
+                    ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)),
+                    b
+                ),
+                ast::Const::Number(n) => println!(
+                    "Print({}) => {}",
+                    ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)),
+                    n
+                ),
             };
             Ok(())
         }

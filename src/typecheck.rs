@@ -276,7 +276,7 @@ pub fn infer_expr(
                     // let t = Type(temporal_undefined, SimpleType::Bool);
                     let t = type_of_typedexpr(op2.clone());
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
-                },
+                }
                 Binop::And => {
                     // todo: negation as failure?
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
@@ -293,7 +293,7 @@ pub fn infer_expr(
                         Type(temp, SimpleType::Option(Box::new(simpl)))
                     };
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
-                },
+                }
                 Binop::Until => {
                     // todo: truthiness
                     let ty1 = Type(temporal_undefined.clone(), SimpleType::Undefined);

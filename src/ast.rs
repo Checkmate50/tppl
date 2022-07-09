@@ -158,10 +158,21 @@ pub fn strip_types_off_texpr(te: TypedExpr) -> Expr {
     match te {
         TypedExpr::TEConst(c, _) => Expr::EConst(c),
         TypedExpr::TEVar(v, _) => Expr::EVar(v),
-        TypedExpr::TEBinop(b, e1, e2, _) => Expr::EBinop(b, Box::new(strip_types_off_texpr(*e1)), Box::new(strip_types_off_texpr(*e2))),
+        TypedExpr::TEBinop(b, e1, e2, _) => Expr::EBinop(
+            b,
+            Box::new(strip_types_off_texpr(*e1)),
+            Box::new(strip_types_off_texpr(*e2)),
+        ),
         TypedExpr::TEUnop(u, e1, _) => Expr::EUnop(u, Box::new(strip_types_off_texpr(*e1))),
         TypedExpr::TEInput(_) => Expr::EInput,
-        TypedExpr::TECall(name, args, _) => Expr::ECall(name, args.into_iter().map(strip_types_off_texpr).collect::<Vec<Expr>>()),
-        TypedExpr::TEPred(name, args, body, _) => Expr::EPred(name, args, Box::new(strip_types_off_texpr(*body))),
+        TypedExpr::TECall(name, args, _) => Expr::ECall(
+            name,
+            args.into_iter()
+                .map(strip_types_off_texpr)
+                .collect::<Vec<Expr>>(),
+        ),
+        TypedExpr::TEPred(name, args, body, _) => {
+            Expr::EPred(name, args, Box::new(strip_types_off_texpr(*body)))
+        }
     }
 }
