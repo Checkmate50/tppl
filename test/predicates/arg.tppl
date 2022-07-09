@@ -1,2 +1,2 @@
-succ(x) = true & x + 1
+succ(x) = x + 1
 print succ(2)

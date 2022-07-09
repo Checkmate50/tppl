@@ -286,3 +286,8 @@ impl From<ImproperCallError> for CompileTimeError {
         CompileTimeError::Type(TypeError::Call(e))
     }
 }
+impl From<PredError> for ExecutionTimeError {
+    fn from(e: PredError) -> Self {
+        ExecutionTimeError::Predicate(e)
+    }
+}

@@ -68,7 +68,7 @@ impl TypeContext {
             }
         } else {
             Err(errors::NameError {
-                message: format!("Name {} was never used.", var_name).to_string(),
+                message: format!("Name {} was never assigned to.", var_name).to_string(),
             })?
         }
     }
@@ -210,8 +210,6 @@ pub fn infer_expr(
         when_dissipates: types::TemporalPersistency::Undefined,
         is_until: None,
     };
-
-    // let type_undefined = Type(temporal_undefined.clone(), SimpleType::Undefined);
 
     match e {
         Expr::EBinop(b, e1, e2) => {
@@ -400,19 +398,52 @@ pub fn infer_expr(
                 .collect();
 
             let mut local_context = ctx.clone();
+
+            // We don't know the return value of predicate, so we set it `SimpleType::Undefined` for now.
+            // Then, we repeat inference to use the proper returned_simpletype of the predicate.
+            let is_first_time = !ctx.vars.contains_key(&name);
+            if is_first_time {
+                // insert predicate name into local
+                local_context.add_name(&name, Type(
+                    // temporalness is assumed to be like `temporal_ty_param`.
+                    // At run-time, the temporalness depends on the assignment operator, but that can be handled then.
+                    // This is just meant to infer the body anyways.
+                    temporal_ty_param.clone(),
+                    SimpleType::Predicate(arg_types.clone(), Box::new(SimpleType::Undefined)),
+                ))?;
+            }
+            // insert parameters into local
             for param in params.iter() {
+                local_context.vars.remove(param);
                 local_context.add_name(
                     param,
                     Type(temporal_ty_param.clone(), SimpleType::Undefined),
                 )?;
             }
 
+            // intial inference
+            if is_first_time {
+                let typed_body = infer_expr(*body.clone(), &mut local_context, until_dependencies, udep_map)?;
+                // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
+                // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
+                let simpl_return_type =
+                    SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
+                
+                local_context.add_name(&name, Type(
+                    temporal_ty_param.clone(),
+                    SimpleType::Predicate(arg_types.clone(), Box::new(simpl_return_type)),
+                ))?;
+            }
+            
             let typed_body = infer_expr(*body, &mut local_context, until_dependencies, udep_map)?;
 
             // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
             // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
             let simpl_return_type =
                 SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
+
+            
+
 
             Ok(TypedExpr::TEPred(
                 name,

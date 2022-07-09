@@ -93,6 +93,7 @@ impl VarContext {
         data: &TypedExpr,
         typ: &Type,
     ) -> Result<(), errors::ExecutionTimeError> {
+        println!("added {}", var_name);
         if let Some((temp_texpr_pairs, simpl)) = self.vars.clone().get(var_name) {
             let mut temp_texpr_pairs = temp_texpr_pairs.clone();
 
@@ -505,7 +506,7 @@ pub fn eval_expr(
             // `f(x) = x > .3 & g` is illegal if `g : proposition`
             let (c1, c2) = match (eval_expr(*e1, ctx)?, eval_expr(*e2, ctx)?) {
                 (TypedExpr::TEConst(c1, _), TypedExpr::TEConst(c2, _)) => (c1, c2),
-                _ => panic!("Did not receive a constant after evaluation."),
+                (a, b) => panic!("{}", format!("Did not receive a constant after evaluation.\n{:?}\n{:?}", a, b)),
             };
 
             let result: Const = match b {
@@ -625,16 +626,21 @@ pub fn eval_expr(
                 })
                 .collect();
 
+
+            // this ain't lazy
+            let args: Result<Vec<TypedExpr>, errors::ExecutionTimeError> = args.into_iter().map(|arg| eval_expr(arg, ctx)).collect();
+            let args: Vec<TypedExpr> = args?;
+
             let curr_successes = run_predicate_definitions(
                 name.clone(),
                 currents,
                 args.clone(),
-                ctx,
-                return_type.clone(),
+                ctx
             )?;
-            if curr_successes.len() == 0 {
+            
+            let invoc_result: Result<TypedExpr, errors::PredError> = if curr_successes.len() == 0 {
                 let futu_successes =
-                    run_predicate_definitions(name, futures, args, ctx, return_type)?;
+                    run_predicate_definitions(name, futures, args, ctx)?;
                 if futu_successes.len() == 0 {
                     Err(errors::NoPredicateError {
                         message: "No Predicates succeeded".to_string(),
@@ -652,7 +658,8 @@ pub fn eval_expr(
                 })?
             } else {
                 Ok(curr_successes.get(0).unwrap().to_owned())
-            }
+            };
+            Ok(ast::new_texpr(invoc_result?, return_type, "Predicate Invocation didn't return desired type.".to_string())?)
         }
         TypedExpr::TEPred(name, params, body, t) => {
             // panic!("FOL! Shouldn't be evaluating propositions.")
@@ -666,23 +673,30 @@ pub fn run_predicate_definitions(
     definitions: Vec<Value>,
     args: Vec<TypedExpr>,
     ctx: &mut VarContext,
-    return_type: Type,
 ) -> Result<Vec<TypedExpr>, ExecutionTimeError> {
+
+    let temporal_undefined = TemporalType {
+        when_available: types::TemporalAvailability::Undefined,
+        when_dissipates: types::TemporalPersistency::Undefined,
+        is_until: None,
+    };
+
     let mut successes: Vec<TypedExpr> = Vec::new();
     for (Type(_, simpl), pred) in definitions.into_iter() {
-        if simpl.is_predicate() {
+        if let SimpleType::Predicate(arg_ts, ret) = simpl {
             let mut local_context = ctx.clone();
             if let TypedExpr::TEPred(_, params, body, _) = pred {
-                for (param, arg) in params.into_iter().zip(args.clone().into_iter()) {
-                    // perhaps do runtime typecheck here?
-                    local_context.add_var(&param, &arg, &type_of_typedexpr(arg.clone()))?;
+                for ((param, arg), arg_t) in params.iter().zip(args.clone().into_iter()).zip(arg_ts.into_iter()) {
+                    local_context.vars.remove(param);
+                    let arg = ast::new_texpr(arg, Type(temporal_undefined.clone(), *arg_t), "Predicate didn't receive expected types of arguments.".to_string())?;
+                    local_context.add_var(param, &arg, &type_of_typedexpr(arg.clone()))?;
                 }
 
                 let val = eval_expr(*body, &mut local_context)?;
                 if is_success(val.clone()) {
                     let type_checked_val = ast::new_texpr(
                         val,
-                        return_type.clone(),
+                        Type(temporal_undefined.clone(), *ret),
                         "predicate gave a funky type".to_string(),
                     )?;
                     successes.push(type_checked_val);
@@ -729,6 +743,7 @@ pub fn exec_command(
             Ok(())
         }
         TypedCommand::TPrint(texpr) => {
+            println!("print........");
             // todo: handle pdfs and propositions when implemented
             let c = match eval_expr(texpr, ctx)? {
                 TypedExpr::TEConst(c, _) => c,
