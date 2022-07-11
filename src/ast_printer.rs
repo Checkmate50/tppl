@@ -69,6 +69,7 @@ pub fn string_of_command(cmd: ast::Command) -> String {
         Command::Update(v, e) => string_of_target(v, e.clone()) + " <- " + &string_of_expr(e),
         Command::Finally(v, e) => string_of_target(v, e.clone()) + " <.. " + &string_of_expr(e),
         Command::Print(e) => "print ".to_owned() + &string_of_expr(e),
+        Command::Assert(c) => "assert ".to_owned() + &string_of_command(*c),
     }
 }
 

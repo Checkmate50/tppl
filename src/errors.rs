@@ -73,6 +73,10 @@ pub struct SUntilConditionUnsatisfied {
     pub message: String,
 }
 #[derive(Debug)]
+pub struct AssertionError {
+    pub message: String,
+}
+#[derive(Debug)]
 pub enum ExecutionTimeError {
     // Should I put `Name`, `Input`, `Until`, `SUntil`, and `Immediate` in some new `AccessError`?
     Type(TypeError),
@@ -83,6 +87,7 @@ pub enum ExecutionTimeError {
     Until(UntilVoidError),
     SUntil(SUntilConditionUnsatisfied),
     Access(AccessError),
+    Assert(AssertionError),
 }
 #[derive(Debug)]
 pub enum PredError {
@@ -181,6 +186,11 @@ impl From<AccessError> for CompileTimeError {
 impl From<AccessError> for ExecutionTimeError {
     fn from(e: AccessError) -> Self {
         ExecutionTimeError::Access(e)
+    }
+}
+impl From<AssertionError> for ExecutionTimeError {
+    fn from(e: AssertionError) -> Self {
+        ExecutionTimeError::Assert(e)
     }
 }
 impl From<PredicateExprError> for ExecutionTimeError {

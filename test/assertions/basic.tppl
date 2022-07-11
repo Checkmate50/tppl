@@ -1,0 +1,4 @@
+x <X 3
+assert x <X 3
+---
+print x  // 3i

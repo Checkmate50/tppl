@@ -125,27 +125,43 @@ fn assignment_parser(
     assignment
 }
 
-pub fn parser() -> impl Parser<lexer::Token, ast::Program, Error = Simple<lexer::Token>> + Clone {
+pub fn command_parser(
+) -> impl Parser<lexer::Token, ast::Command, Error = Simple<lexer::Token>> + Clone {
     use lexer::Token;
 
-    let prog = recursive(|_| {
+    recursive(|_| {
         use ast::Command;
         // ---
         let timestep = just(Token::THREEDASH).to(Command::Timestep);
 
+        // assertion of a non-assignment command (e.g., a print) is non-sensical.
+        let assertion = just(Token::ASSERT)
+            .ignore_then(assignment_parser())
+            .map(|c| Command::Assert(Box::new(c)));
+
         let print = just(Token::PRINT)
-            .then(expr_parser())
-            .map(|(_, e)| Command::Print(e));
+            .ignore_then(expr_parser())
+            .map(Command::Print);
 
-        let newline = just(Token::NEWLINE).or(just(Token::COMMENT));
-
-        let statement = timestep.clone().or(assignment_parser()).or(print.clone());
-
-        newline
+        let statement = timestep
             .clone()
-            .repeated()
-            .ignore_then(statement.separated_by(newline.clone().repeated().at_least(1)))
-            .then_ignore(newline.repeated())
-    });
-    prog.then_ignore(end())
+            .or(assertion)
+            .or(assignment_parser())
+            .or(print.clone());
+
+        statement
+    })
+}
+
+pub fn parser() -> impl Parser<lexer::Token, ast::Program, Error = Simple<lexer::Token>> + Clone {
+    use lexer::Token;
+
+    let newline = just(Token::NEWLINE).or(just(Token::COMMENT));
+
+    newline
+        .clone()
+        .repeated()
+        .ignore_then(command_parser().separated_by(newline.clone().repeated().at_least(1)))
+        .then_ignore(newline.repeated())
+        .then_ignore(end())
 }

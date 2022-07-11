@@ -27,6 +27,8 @@ pub struct VarContext {
     pub until_dependencies_tracker: HashMap<Var, HashMap<Var, Count>>,
     // key is `hash(texpr)` and value is `texpr`
     pub udep_map: HashMap<usize, TypedExpr>,
+    // VariableName : (TemporalTypeOfAssertion, ValueAsserted, was_satisfied_at_least_once)
+    pub assertions: HashMap<Var, Vec<(TemporalType, ast::TypedExpr, bool)>>,
     pub clock: i32,
 }
 
@@ -213,8 +215,224 @@ impl VarContext {
         Ok((aged_pairs, nexts))
     }
 
+    pub fn add_assertion(&mut self, assertion: TypedCommand) -> () {
+        match assertion {
+            TypedCommand::TGlobal(name, texpr) | TypedCommand::TNext(name, texpr) | TypedCommand::TUpdate(name, texpr) | TypedCommand::TFinally(name, texpr) => {
+                if let Some(asserts_de_name) = Self::get_from_hashmap(&self.assertions, &name) {
+                    let ty:Type = ast::type_of_typedexpr(texpr.clone());
+                    // not going to check for temporal conflicts since they can just be caught at assertion-time.
+                    let asserts_de_name = &mut asserts_de_name.clone();
+                    asserts_de_name.push((ty.get_temporal(), ast::strip_untils_off_texpr(texpr), false));
+                    self.assertions.insert(name, asserts_de_name.to_owned());
+                } else {
+                    self.assertions.insert(name, [(ast::type_of_typedexpr(texpr.clone()).get_temporal(), ast::strip_untils_off_texpr(texpr), false)].to_vec());
+                }
+            },
+            TypedCommand::TPrint(_) | TypedCommand::TAssert(_) => panic!("This should've been caught during parsing. Assertions shouldn't assert prints/assertions. `assert(assert(3))` `assert(print(3))`???")
+
+        };
+    }
+
+    pub fn refresh_assertions(&mut self) -> Result<(), errors::ExecutionTimeError> {
+        let aged = self
+            .assertions
+            .clone()
+            .into_iter()
+            .filter_map(|(name, assertion)| {
+                let asserts_de_name = assertion
+                    .into_iter()
+                    .filter_map(|(temp, texpr, was_satisfied)| {
+                        if let Some(aged_temp) = types::advance_type(temp) {
+                            Some((aged_temp, texpr, was_satisfied))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if asserts_de_name.is_empty() {
+                    None
+                } else {
+                    Some((name, asserts_de_name))
+                }
+            })
+            .collect::<Vec<(String, Vec<(TemporalType, TypedExpr, bool)>)>>();
+
+        // use `udep_map`
+        let until_checked = aged
+            .into_iter()
+            .map(|(name, assertion)| {
+                let asserts_de_name:Vec<(TemporalType, TypedExpr, bool)> = assertion.into_iter()
+                    .map(|(temp, texpr, was_satisfied)| {
+                    if let Some(until_conds) = temp.clone().is_until {
+                        let strong: Vec<TypedExpr> = until_conds.strong.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self)).collect::<Result<Vec<TypedExpr>, errors::ExecutionTimeError>>()?;
+                        let weak: Vec<TypedExpr> = until_conds.weak.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self)).collect::<Result<Vec<TypedExpr>, errors::ExecutionTimeError>>()?;
+                        if strong.clone().into_iter().chain(weak.into_iter()).any(boolify) {
+                            // an until_dependency was truthy
+                            if strong.into_iter().all(boolify) {
+                                // all strongs (if they exist) are truthy
+                                Ok(None)
+                            } else{
+                                Err(errors::SUntilConditionUnsatisfied{message:format!("An assertion of {} had an SUntil that was not satisfied by the time of destruction", name).to_string()})?
+                            }
+                        } else {
+                            // no until_dependencies are truthy
+                            Ok(Some((temp, texpr, was_satisfied)))
+                        }
+                    } else {
+                        // no until dependencies
+                        Ok(Some((temp, texpr, was_satisfied)))
+                    }
+                }).collect::<Result<Vec<Option<(TemporalType, TypedExpr, bool)>>, errors::ExecutionTimeError>>()?
+                .into_iter()
+                .filter_map(|x| x)
+                .collect();
+                if asserts_de_name.is_empty() {
+                    // no assertions (either pre or post until_checkup)
+                    Ok(None)
+                } else {
+                    Ok(Some((name, asserts_de_name)))
+                }
+            }
+        ).collect::<Result<Vec<Option<(String, Vec<(TemporalType, TypedExpr, bool)>)>>, errors::ExecutionTimeError>>()?
+        .into_iter()
+        .filter_map(|x| x)
+        .collect()
+        ;
+        self.assertions = until_checked;
+        Ok(())
+    }
+
+    pub fn run_assertions(&mut self) -> Result<(), errors::ExecutionTimeError> {
+        for (name, temp_assertion_pairs) in self.assertions.clone().into_iter() {
+            let currents: Vec<(usize, (TemporalType, TypedExpr, bool))> = temp_assertion_pairs
+                .clone()
+                .into_iter()
+                .enumerate()
+                .filter(|(_, (temp, _, _))| {
+                    temp.when_available == types::TemporalAvailability::Current
+                })
+                .collect();
+            let futures: Vec<(usize, (TemporalType, TypedExpr, bool))> = temp_assertion_pairs
+                .clone()
+                .into_iter()
+                .enumerate()
+                .filter(|(_, (temp, _, _))| {
+                    temp.when_available == types::TemporalAvailability::Future
+                })
+                .collect();
+
+            let assertions_to_be_checked: Option<(Vec<(usize, TypedExpr, bool)>, bool)> =
+                if currents.is_empty() {
+                    if futures.is_empty() {
+                        None
+                    } else {
+                        // forgive for now since it's `future`. it just needs to "eventually" "at some point" hold.
+                        let temporarily_forgive = true;
+                        Some((
+                            futures
+                                .into_iter()
+                                .map(
+                                    |(index, (_, texpr, was_sat))| match eval_expr(texpr, self) {
+                                        Ok(v) => Ok((index, v, was_sat)),
+                                        Err(e) => Err(e),
+                                    },
+                                )
+                                .collect::<Result<Vec<_>, errors::ExecutionTimeError>>()?,
+                            temporarily_forgive,
+                        ))
+                    }
+                } else {
+                    let temporarily_forgive = false;
+                    Some((
+                        currents
+                            .into_iter()
+                            .map(
+                                |(index, (_, texpr, was_sat))| match eval_expr(texpr, self) {
+                                    Ok(v) => Ok((index, v, was_sat)),
+                                    Err(e) => Err(e),
+                                },
+                            )
+                            .collect::<Result<Vec<_>, errors::ExecutionTimeError>>()?,
+                        temporarily_forgive,
+                    ))
+                };
+
+            let temporal_undefined = TemporalType {
+                when_available: types::TemporalAvailability::Undefined,
+                when_dissipates: types::TemporalPersistency::Undefined,
+                is_until: None,
+            };
+
+            match eval_expr(
+                TypedExpr::TEVar(
+                    name.clone(),
+                    Type(temporal_undefined, SimpleType::Undefined),
+                ),
+                self,
+            ) {
+                Ok(texpr) => {
+                    if let Some((assertions_to_be_checked, temporarily_forgive)) =
+                        assertions_to_be_checked
+                    {
+                        let named_const = ast::const_of_texpr(texpr);
+                        let assertion_results: Result<
+                            Vec<(usize, bool, bool)>,
+                            errors::ExecutionTimeError,
+                        > = assertions_to_be_checked
+                            .into_iter()
+                            .map(|(index, e, was_sat)| {
+                                let operands =
+                                    [named_const.clone(), ast::const_of_texpr(e)].to_vec();
+                                let equals: ast::Const = builtins::builtin_eq(operands)?;
+                                match equals {
+                                    ast::Const::Bool(b) => Ok((index, b.clone(), b || was_sat)),
+                                    _ => panic!("Builtin_Eq returned a non-bool."),
+                                }
+                            })
+                            .collect();
+
+                        let assertion_results = assertion_results?;
+                        if !temporarily_forgive
+                            && !assertion_results.iter().all(|(_, x, _)| x.to_owned())
+                        {
+                            Err(errors::AssertionError {
+                                message: format!("an assertion of {} failed.", name).to_string(),
+                            })?
+                        }
+
+                        let assertion_id_wassatisfied: HashMap<usize, bool> = assertion_results
+                            .into_iter()
+                            .map(|(index, _, was_sat)| (index, was_sat))
+                            .collect();
+                        self.assertions.insert(
+                            name,
+                            temp_assertion_pairs
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, (temp, texpr, was_sat))| {
+                                    if let Some(was_sat) = assertion_id_wassatisfied.get(&index) {
+                                        (temp, texpr, was_sat.to_owned())
+                                    } else {
+                                        (temp, texpr, was_sat)
+                                    }
+                                })
+                                .collect(),
+                        );
+                    }
+                }
+                Err(errors::ExecutionTimeError::Access(errors::AccessError::PredExpr(e))) => {
+                    Err(e)?
+                }
+                Err(_) => (), // we ignore assertion if it's currently impossible.
+            };
+        }
+        Ok(())
+    }
+
     pub fn step_time(&mut self) -> Result<(), errors::ExecutionTimeError> {
         self.clock += 1;
+        
+        self.run_assertions()?;
 
         let mut all_nexts: Vec<Var> = Vec::new();
         let context: Result<
@@ -236,6 +454,9 @@ impl VarContext {
         for v in all_nexts.iter() {
             self.refresh_dependents(v)?;
         }
+
+        self.refresh_assertions()?;
+
         Ok(())
     }
 
@@ -293,6 +514,11 @@ impl VarContext {
                         {message : format!("A StrongUntil condition was not satisfied by the time of the value's destruction.\n temp_texpr = {:?}\n unsatisfied_condition = {:?}", temp_texpr, strong)})?
                 }
             }
+
+            // free until_cond_ids
+            for cond_id in until_conds.strong.iter().chain(until_conds.weak.iter()) {
+                self.udep_map.remove(cond_id);
+            }
         }
 
         // delete the value from `self`
@@ -333,7 +559,6 @@ impl VarContext {
         Ok(())
     }
 
-    // checks and deletes values accordingly
     pub fn detect_cycle_until_dep(&mut self, var_name: &Var) -> Result<(), errors::AssignError> {
         if let Some(direct_dependents) = self.until_dependencies_tracker.get(var_name) {
             let mut all_dependents: HashSet<String> = HashSet::new();
@@ -816,20 +1041,24 @@ pub fn exec_command(
             match c {
                 ast::Const::Bool(b) => println!(
                     "Print({}) => {}",
-                    ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)),
+                    ast_printer::string_of_expr(ast::expr_of_texpr(texpr)),
                     b
                 ),
                 ast::Const::Number(n) => println!(
-                    "Print({}) => {}",
-                    ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)),
+                    "Print({}) => {}i",
+                    ast_printer::string_of_expr(ast::expr_of_texpr(texpr)),
                     n
                 ),
                 ast::Const::Float(f) => println!(
-                    "Print({}) => {}",
-                    ast_printer::string_of_expr(ast::strip_types_off_texpr(texpr)),
+                    "Print({}) => {}f",
+                    ast_printer::string_of_expr(ast::expr_of_texpr(texpr)),
                     f
                 ),
             };
+            Ok(())
+        }
+        TypedCommand::TAssert(assertion) => {
+            ctx.add_assertion(*assertion);
             Ok(())
         }
     }
@@ -851,12 +1080,13 @@ pub fn exec_program(pgrm: ast::TypedProgram) -> Result<(), errors::ExecutionTime
         vars: HashMap::new(),
         until_dependencies_tracker: HashMap::new(),
         udep_map: pgrm.udep_map,
+        assertions: HashMap::new(),
         clock: 0,
     };
 
     pgrm.code.iter().try_for_each(|tb| {
-        ctx.step_time()?;
-        exec_time_block(tb.clone(), &mut ctx)
+        exec_time_block(tb.clone(), &mut ctx)?;
+        ctx.step_time()
     })?;
 
     for (name, (temp_texpr_pairs, _)) in ctx.clone().vars.into_iter() {
@@ -865,5 +1095,29 @@ pub fn exec_program(pgrm: ast::TypedProgram) -> Result<(), errors::ExecutionTime
         }
     }
 
+    // refresh assertions here?
+
+    if !ctx.assertions.clone().into_iter().all(|(_, assertions)| {
+        assertions.is_empty() || assertions.into_iter().all(|(_, _, was_sat)| was_sat)
+    }) {
+        Err(errors::AssertionError {
+            message: format!(
+                "The following assertions were not satisfied by the end of the program.\n{}",
+                ctx.assertions
+                    .into_iter()
+                    .map(|(name, asserts_de_name)| asserts_de_name
+                        .into_iter()
+                        .map(|(_, te, _)| (name.clone(), te))
+                        .collect::<Vec<_>>())
+                    .flatten()
+                    .map(|(name, te)| name
+                        + ": "
+                        + &ast_printer::string_of_expr(ast::expr_of_texpr(te)))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+            .to_string(),
+        })?
+    }
     Ok(())
 }

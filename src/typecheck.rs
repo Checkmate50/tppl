@@ -603,15 +603,18 @@ pub fn infer_command(
     cmd: ast::Command,
     ctx: &mut TypeContext,
     udep_map: &mut HashMap<usize, ast::TypedExpr>,
+    is_assert: bool,
 ) -> Result<ast::TypedCommand, errors::CompileTimeError> {
     /*
         look into doc-strings
     */
-    use ast::Command;
-    use ast::TypedCommand;
-    use types::TemporalType;
-    use types::Type;
+    use ast::{Command, TypedCommand};
+    use types::{SimpleType, TemporalType, Type};
 
+    let mut blank_until_dependencies = types::UntilDependencies {
+        weak: Vec::new(),
+        strong: Vec::new(),
+    };
     /*
         Global  : current, always   , false
         Next    : next   , fleeting , false
@@ -624,10 +627,6 @@ pub fn infer_command(
 
         Global(Future(Until)) : future, always, true
     */
-    let mut blank_until_dependencies = types::UntilDependencies {
-        weak: Vec::new(),
-        strong: Vec::new(),
-    };
     match cmd {
         Command::Timestep => {
             panic!("Huh, timesteps should've been taken out with `split`... Why was `infer_command` called on one?")
@@ -654,7 +653,9 @@ pub fn infer_command(
                 )
             };
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
-            ctx.add_name(&v, t)?;
+            if !is_assert {
+                ctx.add_name(&v, t)?;
+            }
             Ok(TypedCommand::TGlobal(v, te))
         }
         Command::Next(v, e) => {
@@ -679,7 +680,9 @@ pub fn infer_command(
                 )
             };
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
-            ctx.add_name(&v, t)?;
+            if !is_assert {
+                ctx.add_name(&v, t)?;
+            }
             Ok(TypedCommand::TNext(v, te))
         }
         Command::Update(v, e) => {
@@ -704,7 +707,9 @@ pub fn infer_command(
                 )
             };
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
-            ctx.add_name(&v, t)?;
+            if !is_assert {
+                ctx.add_name(&v, t)?;
+            }
             Ok(TypedCommand::TUpdate(v, te))
         }
         Command::Finally(v, e) => {
@@ -729,7 +734,9 @@ pub fn infer_command(
                 )
             };
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
-            ctx.add_name(&v, t)?;
+            if !is_assert {
+                ctx.add_name(&v, t)?;
+            }
             Ok(TypedCommand::TFinally(v, te))
         }
         Command::Print(e) => {
@@ -742,6 +749,36 @@ pub fn infer_command(
                         .to_string(),
                 })?
             }
+        }
+        Command::Assert(assertion) => {
+            let assertion = *assertion;
+            let mut local = ctx.clone();
+
+            let free_vars = free_vars_of_command(&assertion);
+            let target: Var = match assertion.clone() {
+                Command::Timestep | Command::Print(_) | Command::Assert(_) => {
+                    panic!("This shouldn't be inside a `Command:Assert`.")
+                }
+                Command::Global(v, _)
+                | Command::Next(v, _)
+                | Command::Update(v, _)
+                | Command::Finally(v, _) => v,
+            };
+
+            // for static checking, we pretend the variables are always available when needed.
+            let temporal_ty_assert = TemporalType {
+                when_available: types::TemporalAvailability::Current,
+                when_dissipates: types::TemporalPersistency::Always,
+                is_until: None,
+            };
+
+            for v in free_vars.iter().chain(iter::once(&target)) {
+                local.vars.remove(v);
+                local.add_name(v, Type(temporal_ty_assert.clone(), SimpleType::Undefined))?
+            }
+            Ok(TypedCommand::TAssert(Box::new(infer_command(
+                assertion, &mut local, udep_map, true,
+            )?)))
         }
     }
 }
@@ -818,7 +855,7 @@ pub fn dupe_check_cmd(
                 Ok(())
             }
         }
-        Command::Print(_) => Ok(()),
+        Command::Print(_) | Command::Assert(_) => Ok(()),
     }
 }
 
@@ -838,7 +875,7 @@ pub fn infer_timeblock(
 ) -> Result<ast::TypedTimeBlock, errors::CompileTimeError> {
     let cmds: Result<ast::TypedTimeBlock, _> = block
         .iter()
-        .map(|cmd| infer_command(cmd.clone(), ctx, udep_map))
+        .map(|cmd| infer_command(cmd.clone(), ctx, udep_map, false))
         .collect();
     ctx.step_time();
 
@@ -889,6 +926,7 @@ pub fn free_vars_of_command(cmd: &ast::Command) -> ast::FreeVars {
             free_vars_of_expr(e.clone())
         },
         Command::Print(e) => free_vars_of_expr(e),
+        Command::Assert(c) => free_vars_of_command(&*c)
     }
 }
 
@@ -902,6 +940,7 @@ pub fn defined_var_of_command(cmd: &ast::Command) -> Option<ast::Var> {
         Command::Update(_v, _) => None,
         Command::Finally(v, _) => Some(v),
         Command::Print(_) => None,
+        Command::Assert(_) => None
     }
 }
 

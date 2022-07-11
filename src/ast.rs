@@ -48,6 +48,7 @@ pub enum Command {
     Update(Var, Expr),
     Finally(Var, Expr),
     Print(Expr),
+    Assert(Box<Command>),
 }
 
 pub type Program = Vec<Command>;
@@ -71,6 +72,7 @@ pub enum TypedCommand {
     TUpdate(Var, TypedExpr),
     TFinally(Var, TypedExpr),
     TPrint(TypedExpr),
+    TAssert(Box<TypedCommand>),
 }
 
 // `y` is the free var in `f(x) = x * y`
@@ -95,6 +97,13 @@ pub fn type_of_typedexpr(e: TypedExpr) -> types::Type {
         TypedExpr::TEInput(t) => t,
         TypedExpr::TECall(_, _, t) => t,
         TypedExpr::TEPred(_, _, _, t) => t,
+    }
+}
+
+pub fn const_of_texpr(te: TypedExpr) -> Const {
+    match te {
+        TypedExpr::TEConst(c, _) => c,
+        _ => panic!("That ain't a constant."),
     }
 }
 
@@ -155,25 +164,72 @@ pub fn new_texpr(
     }
 }
 
-pub fn strip_types_off_texpr(te: TypedExpr) -> Expr {
+pub fn expr_of_texpr(te: TypedExpr) -> Expr {
     match te {
         TypedExpr::TEConst(c, _) => Expr::EConst(c),
         TypedExpr::TEVar(v, _) => Expr::EVar(v),
         TypedExpr::TEBinop(b, e1, e2, _) => Expr::EBinop(
             b,
-            Box::new(strip_types_off_texpr(*e1)),
-            Box::new(strip_types_off_texpr(*e2)),
+            Box::new(expr_of_texpr(*e1)),
+            Box::new(expr_of_texpr(*e2)),
         ),
-        TypedExpr::TEUnop(u, e1, _) => Expr::EUnop(u, Box::new(strip_types_off_texpr(*e1))),
+        TypedExpr::TEUnop(u, e1, _) => Expr::EUnop(u, Box::new(expr_of_texpr(*e1))),
         TypedExpr::TEInput(_) => Expr::EInput,
         TypedExpr::TECall(name, args, _) => Expr::ECall(
             name,
-            args.into_iter()
-                .map(strip_types_off_texpr)
-                .collect::<Vec<Expr>>(),
+            args.into_iter().map(expr_of_texpr).collect::<Vec<Expr>>(),
         ),
         TypedExpr::TEPred(name, args, body, _) => {
-            Expr::EPred(name, args, Box::new(strip_types_off_texpr(*body)))
+            Expr::EPred(name, args, Box::new(expr_of_texpr(*body)))
         }
     }
 }
+
+// this is to help handle `assert`s since `asssert x = 1 <!> cond` executes `1 <!> cond` everytime the assertion is checked,
+// which can lead to `Error: UntilCond is True at the time of evaluation`
+pub fn strip_untils_off_texpr(te: TypedExpr) -> TypedExpr {
+    match te.clone() {
+        TypedExpr::TEConst(_, _) => te,
+        TypedExpr::TEVar(_, _) => te,
+        TypedExpr::TEBinop(b, op1, op2, t) => {
+            match b {
+                Binop::SUntil | Binop::Until => strip_untils_off_texpr(*op1),
+                _ => TypedExpr::TEBinop(b, Box::new(strip_untils_off_texpr(*op1)), Box::new(strip_untils_off_texpr(*op2)), t)
+            }
+        },
+        TypedExpr::TEUnop(u, op1, t) => TypedExpr::TEUnop(u, Box::new(strip_untils_off_texpr(*op1)), t),
+        TypedExpr::TEInput(_) => te,
+        TypedExpr::TECall(_, _, _) => te,
+        TypedExpr::TEPred(_, _, _, _) => te,
+    }
+}
+
+// pub fn expr_has_until(e: Expr) -> bool {
+//     match e {
+//         Expr::EConst(_) | Expr::EVar(_) => false,
+//         Expr::EInput => false,
+//         Expr::EBinop(b, e1, e2) => b == Binop::Until || b == Binop::SUntil || expr_has_until(*e1) || expr_has_until(*e2),
+//         Expr::EUnop(_, e1) => expr_has_until(*e1),
+//         Expr::ECall(_, _) => false, // sure, user could do `f(3 <!> y)`, but it's ignoreable for `expr_has_until`'s usecase.
+//         Expr::EPred(_, _, body) => expr_has_until(*body),
+//     }
+// }
+
+// pub fn expr_of_command(c: Command) -> Expr {
+//     match c {
+//         Command::Timestep => panic!("It's a Timestep. Atp, I might just get rid of `TimeStep`."),
+//         Command::Global(_, e) | Command::Next(_, e) | Command::Update(_, e) | Command::Finally(_, e) => e,
+//         Command::Print(e) => e,
+//         Command::Assert(cmd) => expr_of_command(*cmd),
+//     }
+// }
+// pub fn cmd_of_tcmd(tc: TypedCommand) -> Command {
+//     match tc {
+//         TypedCommand::TGlobal(v, te) => Command::Global(v, expr_of_texpr(te)),
+//         TypedCommand::TNext(v, te) => Command::Next(v, expr_of_texpr(te)),
+//         TypedCommand::TUpdate(v, te) => Command::Update(v, expr_of_texpr(te)),
+//         TypedCommand::TFinally(v, te) => Command::Finally(v, expr_of_texpr(te)),
+//         TypedCommand::TPrint(te) => Command::Print(expr_of_texpr(te)),
+//         TypedCommand::TAssert(inner_tc) => Command::Assert(Box::new(cmd_of_tcmd(*inner_tc))),
+//     }
+// }

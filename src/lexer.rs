@@ -25,6 +25,7 @@ pub enum Token {
     Var(String),
     COMMENT,
     COMMA,
+    ASSERT,
 }
 
 impl fmt::Display for Token {
@@ -48,6 +49,7 @@ impl fmt::Display for Token {
             Token::RPAREN => write!(f, ")"),
             Token::COMMENT => write!(f, "# COMMENT"),
             Token::COMMA => write!(f, ","),
+            Token::ASSERT => write!(f, "assert"),
         }
     }
 }
@@ -55,8 +57,7 @@ impl fmt::Display for Token {
 // Boring old lexer stuff
 // https://github.com/zesterer/chumsky/blob/master/examples/nano_rust.rs is pretty much copied tbch
 pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + Clone {
-    let integer = text::int(10)
-        .map(Token::Number);
+    let integer = text::int(10).map(Token::Number);
 
     let floating = text::int(10)
         .chain::<char, _, _>(just('.').chain(text::digits(10)))
@@ -88,6 +89,7 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
         "false" => Token::FALSE,
         "input" => Token::INPUT,
         "print" => Token::PRINT,
+        "assert" => Token::ASSERT,
         _ => Token::Var(ident),
     });
 
