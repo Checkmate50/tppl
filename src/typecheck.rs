@@ -237,34 +237,28 @@ pub fn infer_expr(
 
             match b {
                 Binop::Plus | Binop::Minus | Binop::Times | Binop::Div => {
-                    let simpl1 = match type_of_typedexpr(operand1.clone()).get_simpl() {
-                        SimpleType::Int => SimpleType::Int,
-                        SimpleType::Float => SimpleType::Float,
-                        SimpleType::Option(a) => {
-                            SimpleType::Option(Box::new(match types::boil_simple(*a) {
-                                SimpleType::Int => SimpleType::Int,
-                                SimpleType::Float => SimpleType::Float,
-                                SimpleType::Undefined => SimpleType::Undefined,
-                                _ => SimpleType::Bottom,
-                            }))
-                        }
-                        SimpleType::Undefined => SimpleType::Undefined,
-                        _ => SimpleType::Bottom,
-                    };
-                    let simpl2 = match type_of_typedexpr(operand2.clone()).get_simpl() {
-                        SimpleType::Int => SimpleType::Int,
-                        SimpleType::Float => SimpleType::Float,
-                        SimpleType::Option(a) => {
-                            SimpleType::Option(Box::new(match types::boil_simple(*a) {
-                                SimpleType::Int => SimpleType::Int,
-                                SimpleType::Float => SimpleType::Float,
-                                SimpleType::Undefined => SimpleType::Undefined,
-                                _ => SimpleType::Bottom,
-                            }))
-                        }
-                        SimpleType::Undefined => SimpleType::Undefined,
-                        _ => SimpleType::Bottom,
-                    };
+                    let simpl1 =
+                        match types::boil_simple(type_of_typedexpr(operand1.clone()).get_simpl()) {
+                            SimpleType::Option(_) => {
+                                panic!("Boiling still gave an Option SimpleType??")
+                            }
+                            SimpleType::Int => SimpleType::Int,
+                            SimpleType::Float => SimpleType::Float,
+                            SimpleType::Undefined => SimpleType::Undefined,
+                            SimpleType::Pdf => SimpleType::Pdf,
+                            _ => SimpleType::Bottom,
+                        };
+                    let simpl2 =
+                        match types::boil_simple(type_of_typedexpr(operand2.clone()).get_simpl()) {
+                            SimpleType::Option(_) => {
+                                panic!("Boiling still gave an Option SimpleType??")
+                            }
+                            SimpleType::Int => SimpleType::Int,
+                            SimpleType::Float => SimpleType::Float,
+                            SimpleType::Undefined => SimpleType::Undefined,
+                            SimpleType::Pdf => SimpleType::Pdf,
+                            _ => SimpleType::Bottom,
+                        };
                     let ty1 = Type(temporal_undefined.clone(), simpl1.clone());
                     let ty2 = Type(temporal_undefined.clone(), simpl2.clone());
                     let op1 = ast::new_texpr(
@@ -280,12 +274,12 @@ pub fn infer_expr(
                             .to_string(),
                     )?;
 
-                    let simpl = match (
-                        types::boil_simple(simpl1.clone()),
-                        types::boil_simple(simpl2.clone()),
-                    ) {
+                    let simpl = match (simpl1, simpl2) {
                         (SimpleType::Option(_), _) | (_, SimpleType::Option(_)) => {
                             panic!("Boiling still gave an Option SimpleType??")
+                        }
+                        (SimpleType::Undefined, _) | (_, SimpleType::Undefined) => {
+                            SimpleType::Undefined
                         }
                         (SimpleType::Float, SimpleType::Float)
                         | (SimpleType::Float, SimpleType::Int)
@@ -297,9 +291,7 @@ pub fn infer_expr(
                                 SimpleType::Int
                             }
                         }
-                        (SimpleType::Undefined, _) | (_, SimpleType::Undefined) => {
-                            SimpleType::Undefined
-                        }
+                        (SimpleType::Pdf, _) | (_, SimpleType::Pdf) => SimpleType::Pdf,
                         _ => SimpleType::Bottom,
                     };
 
@@ -379,12 +371,7 @@ pub fn infer_expr(
             }
         }
         Expr::EConst(c) => {
-            use ast::Const;
-            let t = match c {
-                Const::Bool(_) => Type(temporal_undefined, SimpleType::Bool),
-                Const::Number(_) => Type(temporal_undefined, SimpleType::Int),
-                Const::Float(_) => Type(temporal_undefined, SimpleType::Float),
-            };
+            let t = ast::type_of_constant(c.clone());
             Ok(TypedExpr::TEConst(c, t))
         }
         Expr::EUnop(u, e1) => {
@@ -400,6 +387,7 @@ pub fn infer_expr(
                             SimpleType::Int => SimpleType::Int,
                             SimpleType::Float => SimpleType::Float,
                             SimpleType::Undefined => SimpleType::Undefined,
+                            SimpleType::Pdf => SimpleType::Pdf,
                             _ => SimpleType::Bottom,
                         };
                     let ty1 = Type(temporal_undefined.clone(), simpl1);
@@ -477,7 +465,7 @@ pub fn infer_expr(
                     .into_iter()
                     .map(|texpr| ast::type_of_typedexpr(texpr).get_simpl())
                     .collect();
-                let ret: SimpleType = builtins::typecheck_builtin_cmp(name.clone(), simpls)?;
+                let ret: SimpleType = builtins::typecheck_builtin(name.clone(), simpls)?;
                 Ok(TypedExpr::TECall(
                     name,
                     typed_args,

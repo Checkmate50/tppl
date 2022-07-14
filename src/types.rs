@@ -1,11 +1,11 @@
 use crate::errors;
 
-#[derive(Clone, PartialEq, Hash, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum SimpleType {
     Bool,
     Float,
     Int,
-    // Pdf,
+    Pdf,
     Predicate(Vec<Box<SimpleType>>, Box<SimpleType>),
     // currently, `interpreters::run_predicate_definitions` doesn't use `Option` in its fullness.
     // It first checks if it's correct (ie. a "Some"). Then, it does type-checking.
@@ -20,13 +20,6 @@ impl SimpleType {
     pub fn is_predicate(&self) -> bool {
         match self {
             SimpleType::Predicate(_, _) => true,
-            _ => false,
-        }
-    }
-    // excludes PDFs
-    pub fn is_numeric(&self) -> bool {
-        match self {
-            SimpleType::Int => true,
             _ => false,
         }
     }
@@ -53,14 +46,14 @@ impl SimpleType {
 
     Global(Future(Until)) : future, always, true
 */
-#[derive(Clone, PartialEq, Hash, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum TemporalAvailability {
     Current,
     Next,
     Future,
     Undefined,
 }
-#[derive(Clone, PartialEq, Hash, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum TemporalPersistency {
     Fleeting,
     Lingering,
@@ -68,7 +61,7 @@ pub enum TemporalPersistency {
     Undefined,
 }
 
-#[derive(Clone, PartialEq, Hash, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct UntilDependencies {
     pub weak: Vec<usize>,
     pub strong: Vec<usize>,
@@ -80,14 +73,14 @@ impl UntilDependencies {
     }
 }
 
-#[derive(Clone, PartialEq, Hash, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct TemporalType {
     pub when_available: TemporalAvailability,
     pub when_dissipates: TemporalPersistency,
     pub is_until: Option<UntilDependencies>,
 }
 
-#[derive(Clone, PartialEq, Hash, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Type(pub TemporalType, pub SimpleType);
 
 impl Type {

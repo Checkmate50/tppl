@@ -26,6 +26,8 @@ pub enum Token {
     COMMENT,
     COMMA,
     ASSERT,
+    UNIFORM,
+    NORMAL,
 }
 
 impl fmt::Display for Token {
@@ -50,6 +52,8 @@ impl fmt::Display for Token {
             Token::COMMENT => write!(f, "# COMMENT"),
             Token::COMMA => write!(f, ","),
             Token::ASSERT => write!(f, "assert"),
+            Token::UNIFORM => write!(f, "uniform"),
+            Token::NORMAL => write!(f, "normal"),
         }
     }
 }
@@ -90,6 +94,8 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> + 
         "input" => Token::INPUT,
         "print" => Token::PRINT,
         "assert" => Token::ASSERT,
+        "uniform" => Token::UNIFORM,
+        "normal" => Token::NORMAL,
         _ => Token::Var(ident),
     });
 

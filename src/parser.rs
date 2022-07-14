@@ -5,16 +5,48 @@ use chumsky::prelude::*;
 fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::Token>> + Clone {
     use ast::Expr;
     use lexer::Token;
-    recursive(|expr| {
+
+    recursive(|expr: Recursive<Token, ast::Expr, Simple<lexer::Token>>| {
         let val = select! {
             Token::Number(n) => Expr::EConst(ast::Const::Number(n.parse().unwrap())),
             Token::Float(f) => Expr::EConst(ast::Const::Float(f.parse().unwrap())),
             Token::TRUE => Expr::EConst(ast::Const::Bool(true)),
             Token::FALSE => Expr::EConst(ast::Const::Bool(false)),
             Token::Var(x) => Expr::EVar(x),
-            Token::INPUT => Expr::EInput
+            Token::INPUT => Expr::EInput,
+            Token::UNIFORM => Expr::EConst(ast::Const::Pdf(
+                ast::Distribution::Uniform(
+                    Box::new(ast::Const::Number(0)), Box::new(ast::Const::Number(1)))
+                )
+            ),
+            Token::NORMAL => Expr::EConst(ast::Const::Pdf(
+                ast::Distribution::Normal(
+                    Box::new(ast::Const::Number(0)), Box::new(ast::Const::Number(1)))
+                )
+            ),
         }
         .labelled("value");
+
+        let pdf = choice((
+            just(Token::UNIFORM)
+                .ignore_then(
+                    expr.clone()
+                        .separated_by(just(Token::COMMA))
+                        .exactly(2)
+                        .allow_trailing()
+                        .delimited_by(just(Token::LPAREN), just(Token::RPAREN)),
+                )
+                .map(|args| Expr::ECall("uniform".to_string(), args)),
+            just(Token::NORMAL)
+                .ignore_then(
+                    expr.clone()
+                        .separated_by(just(Token::COMMA))
+                        .exactly(2)
+                        .allow_trailing()
+                        .delimited_by(just(Token::LPAREN), just(Token::RPAREN)),
+                )
+                .map(|args| Expr::ECall("normal".to_string(), args)),
+        ));
 
         let ident = select! { Token::Var(ident) => ident.clone() };
         let call = ident
@@ -27,6 +59,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
             .map(|(f, args)| Expr::ECall(f, args));
 
         let atom = call
+            .or(pdf)
             .or(val)
             .or(expr.delimited_by(just(Token::LPAREN), just(Token::RPAREN)));
 

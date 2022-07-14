@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::iter;
 
 use crate::ast::type_of_typedexpr;
-use crate::types;
+use crate::{arithmetic, types};
 use crate::{ast, builtins};
 use crate::{ast_printer, errors};
 use ast::{TypedCommand, TypedExpr, Var};
@@ -431,7 +431,7 @@ impl VarContext {
 
     pub fn step_time(&mut self) -> Result<(), errors::ExecutionTimeError> {
         self.clock += 1;
-        
+
         self.run_assertions()?;
 
         let mut all_nexts: Vec<Var> = Vec::new();
@@ -593,6 +593,7 @@ pub fn boolify(texpr: TypedExpr) -> bool {
             ast::Const::Bool(b) => b,
             ast::Const::Number(_) => panic!("Truthy-falsey not implemented yet for integers."),
             ast::Const::Float(_) => panic!("Truthy-falsey not implemented yet for floats."),
+            ast::Const::Pdf(_) => panic!("Truthy-falsey not implemented yet for floats."),
         },
         _ => panic!("Truthy-falsey not implemented yet for non-constants."),
     }
@@ -604,6 +605,7 @@ pub fn is_success(texpr: TypedExpr) -> bool {
             ast::Const::Bool(b) => b,
             ast::Const::Number(_) => true,
             ast::Const::Float(_) => true,
+            ast::Const::Pdf(_) => true,
         },
         _ => panic!("Truthy-falsey not implemented yet for non-constants."),
     }
@@ -755,36 +757,10 @@ pub fn eval_expr(
             };
 
             let result: Const = match b {
-                Binop::Plus => match (c1, c2.unwrap()) {
-                    (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 + n2),
-                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) + f2),
-                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 + (n2 as f64)),
-                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 + f2),
-                    _ => panic!("Type-checking failed??"),
-                },
-                Binop::Minus => match (c1, c2.unwrap()) {
-                    (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 - n2),
-                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) - f2),
-                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 - (n2 as f64)),
-                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 - f2),
-                    _ => panic!("Type-checking failed??"),
-                },
-                Binop::Times => match (c1, c2.unwrap()) {
-                    (Const::Number(n1), Const::Number(n2)) => Const::Number(n1 * n2),
-                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) * f2),
-                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 * (n2 as f64)),
-                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 * f2),
-                    _ => panic!("Type-checking failed??"),
-                },
-                Binop::Div => match (c1, c2.unwrap()) {
-                    (Const::Number(n1), Const::Number(n2)) => {
-                        Const::Float((n1 as f64) / (n2 as f64))
-                    }
-                    (Const::Number(n1), Const::Float(f2)) => Const::Float((n1 as f64) / f2),
-                    (Const::Float(f1), Const::Number(n2)) => Const::Float(f1 / (n2 as f64)),
-                    (Const::Float(f1), Const::Float(f2)) => Const::Float(f1 / f2),
-                    _ => panic!("Type-checking failed??"),
-                },
+                Binop::Plus => arithmetic::add(c1, c2.unwrap())?,
+                Binop::Minus => arithmetic::sub(c1, c2.unwrap())?,
+                Binop::Times => arithmetic::mul(c1, c2.unwrap())?,
+                Binop::Div => arithmetic::div(c1, c2.unwrap())?,
                 Binop::Until | Binop::SUntil => match (c1.clone(), c2.clone().unwrap()) {
                     (_, Const::Bool(cond)) => {
                         if cond {
@@ -850,15 +826,12 @@ pub fn eval_expr(
             };
 
             let result = match u {
-                Unop::Neg => match c {
-                    Const::Bool(_) => panic!("Type-checking failed??"),
-                    Const::Number(n) => Const::Number(-n),
-                    Const::Float(f) => Const::Float(-f),
-                },
+                Unop::Neg => arithmetic::add(Const::Float(0.0), c)?,
                 Unop::Not => match c {
                     Const::Bool(b) => Const::Bool(!b),
-                    Const::Number(_) => panic!("Type-checking failed??"),
-                    Const::Float(_) => panic!("Type-checking failed??"),
+                    Const::Number(_) | Const::Float(_) | Const::Pdf(_) => {
+                        panic!("Type-checking failed??")
+                    }
                 },
             };
             let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
@@ -890,7 +863,7 @@ pub fn eval_expr(
             let return_val: Result<TypedExpr, errors::ExecutionTimeError> =
                 if builtins::is_builtin(&name) {
                     // don't need to constrain/check `return_type` since it's built-in.
-                    Ok(builtins::exec_builtin_cmp(name, args)?)
+                    Ok(builtins::exec_builtin(name, args)?)
                 } else {
                     // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
                     let preds = ctx.look_up(&name)?;
@@ -1053,6 +1026,11 @@ pub fn exec_command(
                     "Print({}) => {}f",
                     ast_printer::string_of_expr(ast::expr_of_texpr(texpr)),
                     f
+                ),
+                ast::Const::Pdf(d) => println!(
+                    "Print({}) => {}",
+                    ast_printer::string_of_expr(ast::expr_of_texpr(texpr)),
+                    ast_printer::string_of_distribution(d)
                 ),
             };
             Ok(())

@@ -1,14 +1,15 @@
 use chumsky::{prelude::*, Stream};
 use std::{env, fs};
+mod arithmetic;
 mod ast;
 mod ast_printer;
-pub mod builtins;
-pub mod errors;
-pub mod interpreter;
+mod builtins;
+mod errors;
+mod interpreter;
 mod lexer;
 mod parser;
-pub mod typecheck;
-pub mod types;
+mod typecheck;
+mod types;
 
 fn main() {
     let src = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))

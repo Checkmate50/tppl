@@ -1,11 +1,30 @@
 use crate::ast;
 
+pub fn string_of_distribution(d: ast::Distribution) -> String {
+    use ast::Distribution;
+    match d {
+        Distribution::Uniform(low, high) => format!(
+            "Uniform({}, {})",
+            string_of_const(*low),
+            string_of_const(*high)
+        )
+        .to_string(),
+        Distribution::Normal(mean, std_dev) => format!(
+            "Normal({}, {})",
+            string_of_const(*mean),
+            string_of_const(*std_dev)
+        )
+        .to_string(),
+    }
+}
+
 pub fn string_of_const(c: ast::Const) -> String {
     use ast::Const;
     match c {
         Const::Bool(b) => b.to_string(),
         Const::Number(n) => n.to_string(),
         Const::Float(f) => f.to_string(),
+        Const::Pdf(d) => string_of_distribution(d),
     }
 }
 

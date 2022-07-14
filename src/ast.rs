@@ -3,10 +3,17 @@ use std::collections::{HashMap, HashSet};
 use crate::{errors, types};
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Distribution {
+    Uniform(Box<Const>, Box<Const>), // Uniform(lower: f64, upper: f64)
+    Normal(Box<Const>, Box<Const>),  // Normal(mean: f64, std_dev: f64)
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Const {
     Bool(bool),
     Number(i64),
     Float(f64), // pdf
+    Pdf(Distribution),
 }
 
 pub type Var = String;
@@ -118,6 +125,7 @@ pub fn type_of_constant(c: Const) -> types::Type {
         Const::Number(_) => types::Type(temporal_undefined, types::SimpleType::Int),
         Const::Bool(_) => types::Type(temporal_undefined, types::SimpleType::Bool),
         Const::Float(_) => types::Type(temporal_undefined, types::SimpleType::Float),
+        Const::Pdf(_) => types::Type(temporal_undefined, types::SimpleType::Pdf),
     }
 }
 
@@ -191,16 +199,33 @@ pub fn strip_untils_off_texpr(te: TypedExpr) -> TypedExpr {
     match te.clone() {
         TypedExpr::TEConst(_, _) => te,
         TypedExpr::TEVar(_, _) => te,
-        TypedExpr::TEBinop(b, op1, op2, t) => {
-            match b {
-                Binop::SUntil | Binop::Until => strip_untils_off_texpr(*op1),
-                _ => TypedExpr::TEBinop(b, Box::new(strip_untils_off_texpr(*op1)), Box::new(strip_untils_off_texpr(*op2)), t)
-            }
+        TypedExpr::TEBinop(b, op1, op2, t) => match b {
+            Binop::SUntil | Binop::Until => strip_untils_off_texpr(*op1),
+            _ => TypedExpr::TEBinop(
+                b,
+                Box::new(strip_untils_off_texpr(*op1)),
+                Box::new(strip_untils_off_texpr(*op2)),
+                t,
+            ),
         },
-        TypedExpr::TEUnop(u, op1, t) => TypedExpr::TEUnop(u, Box::new(strip_untils_off_texpr(*op1)), t),
+        TypedExpr::TEUnop(u, op1, t) => {
+            TypedExpr::TEUnop(u, Box::new(strip_untils_off_texpr(*op1)), t)
+        }
         TypedExpr::TEInput(_) => te,
         TypedExpr::TECall(_, _, _) => te,
         TypedExpr::TEPred(_, _, _, _) => te,
+    }
+}
+
+pub fn string_of_const_type(c: &Const) -> String {
+    match c {
+        Const::Bool(_) => "Bool".to_string(),
+        Const::Float(_) => "Float".to_string(),
+        Const::Number(_) => "Number".to_string(),
+        Const::Pdf(d) => match d {
+            Distribution::Uniform(_, _) => "Uniform".to_string(),
+            Distribution::Normal(_, _) => "Normal".to_string(),
+        },
     }
 }
 
