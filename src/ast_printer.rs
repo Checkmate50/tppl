@@ -19,7 +19,8 @@ pub fn string_of_distribution(d: ast::Distribution) -> String {
             "List({}, ...)",
             consts
                 .iter()
-                .map(f64::to_string).take(3)
+                .map(f64::to_string)
+                .take(3)
                 .collect::<Vec<String>>()
                 .join(", ")
         )
@@ -27,7 +28,7 @@ pub fn string_of_distribution(d: ast::Distribution) -> String {
     }
 }
 
-pub fn string_of_const(c: ast::Const) -> String {
+fn string_of_const(c: ast::Const) -> String {
     use ast::Const;
     match c {
         Const::Bool(b) => b.to_string(),
@@ -37,7 +38,7 @@ pub fn string_of_const(c: ast::Const) -> String {
     }
 }
 
-pub fn string_of_binop(b: ast::Binop) -> String {
+fn string_of_binop(b: ast::Binop) -> String {
     use ast::Binop;
     match b {
         Binop::And => "&".to_owned(),
@@ -51,7 +52,7 @@ pub fn string_of_binop(b: ast::Binop) -> String {
     }
 }
 
-pub fn string_of_unop(u: ast::Unop) -> String {
+fn string_of_unop(u: ast::Unop) -> String {
     use ast::Unop;
     match u {
         Unop::Neg => "-".to_owned(),
@@ -81,14 +82,14 @@ pub fn string_of_expr(e: ast::Expr) -> String {
     }
 }
 
-pub fn string_of_target(name: String, e: ast::Expr) -> String {
+fn string_of_target(name: String, e: ast::Expr) -> String {
     match e {
         ast::Expr::EPred(_name, args, _body) => name + "(" + &args.join(",") + ")",
         _ => name,
     }
 }
 
-pub fn string_of_command(cmd: ast::Command) -> String {
+fn string_of_command(cmd: ast::Command) -> String {
     use ast::Command;
     match cmd {
         Command::Timestep => "---".to_owned(),
@@ -98,6 +99,7 @@ pub fn string_of_command(cmd: ast::Command) -> String {
         Command::Finally(v, e) => string_of_target(v, e.clone()) + " <.. " + &string_of_expr(e),
         Command::Print(e) => "print ".to_owned() + &string_of_expr(e),
         Command::Assert(c) => "assert ".to_owned() + &string_of_command(*c),
+        Command::Dist(e) => "dist ".to_owned() + &string_of_expr(e),
     }
 }
 

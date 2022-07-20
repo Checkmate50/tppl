@@ -14,15 +14,15 @@ use petgraph::stable_graph::NodeIndex;
 // use petgraph::algo::is_cyclic_directed;
 
 #[derive(Debug, Clone)]
-pub struct TypeContext {
+struct TypeContext {
     // only global scope
-    pub vars: HashMap<Var, (Vec<types::TemporalType>, types::SimpleType)>,
-    pub clock: i32,
+    vars: HashMap<Var, (Vec<types::TemporalType>, types::SimpleType)>,
+    clock: i32,
 }
 
 impl TypeContext {
     // gives type of variable name.
-    pub fn look_up(&mut self, var_name: &Var) -> Result<types::Type, errors::CompileTimeError> {
+    fn look_up(&mut self, var_name: &Var) -> Result<types::Type, errors::CompileTimeError> {
         if builtins::is_builtin(var_name) {
             Err(errors::PredicateExprError {
                 message: format!(
@@ -83,7 +83,7 @@ impl TypeContext {
     }
 
     // adds new variable
-    pub fn add_name(
+    fn add_name(
         &mut self,
         var_name: &Var,
         data: types::Type,
@@ -132,7 +132,7 @@ impl TypeContext {
         Ok(())
     }
 
-    pub fn step_time(&mut self) -> () {
+    fn step_time(&mut self) -> () {
         self.clock += 1;
         self.vars = self
             .vars
@@ -161,7 +161,7 @@ fn get_id() -> usize {
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-pub fn get_most_immediate_type(temps: &Vec<types::TemporalType>) -> Option<types::TemporalType> {
+fn get_most_immediate_type(temps: &Vec<types::TemporalType>) -> Option<types::TemporalType> {
     use types::TemporalAvailability;
     let most_immediate = temps
         .into_iter()
@@ -181,7 +181,7 @@ pub fn get_most_immediate_type(temps: &Vec<types::TemporalType>) -> Option<types
     }
 }
 
-pub fn filter_out_nexts(temps: &Vec<types::TemporalType>) -> Vec<types::TemporalType> {
+fn filter_out_nexts(temps: &Vec<types::TemporalType>) -> Vec<types::TemporalType> {
     let only_currents: Vec<types::TemporalType> = temps
         .into_iter()
         .filter(|temp| temp.when_available != types::TemporalAvailability::Next)
@@ -190,9 +190,7 @@ pub fn filter_out_nexts(temps: &Vec<types::TemporalType>) -> Vec<types::Temporal
     only_currents
 }
 
-pub fn sort_types_by_immediacy(
-    temps: &Vec<types::TemporalType>,
-) -> Option<Vec<types::TemporalType>> {
+fn sort_types_by_immediacy(temps: &Vec<types::TemporalType>) -> Option<Vec<types::TemporalType>> {
     use types::TemporalAvailability;
     let mut only_currents = filter_out_nexts(temps);
 
@@ -211,7 +209,7 @@ pub fn sort_types_by_immediacy(
     }
 }
 
-pub fn infer_expr(
+fn infer_expr(
     e: ast::Expr,
     ctx: &mut TypeContext,
     until_dependencies: &mut types::UntilDependencies,
@@ -237,28 +235,20 @@ pub fn infer_expr(
 
             match b {
                 Binop::Plus | Binop::Minus | Binop::Times | Binop::Div => {
-                    let simpl1 =
-                        match types::boil_simple(type_of_typedexpr(operand1.clone()).get_simpl()) {
-                            SimpleType::Option(_) => {
-                                panic!("Boiling still gave an Option SimpleType??")
-                            }
-                            SimpleType::Int => SimpleType::Int,
-                            SimpleType::Float => SimpleType::Float,
-                            SimpleType::Undefined => SimpleType::Undefined,
-                            SimpleType::Pdf => SimpleType::Pdf,
-                            _ => SimpleType::Bottom,
-                        };
-                    let simpl2 =
-                        match types::boil_simple(type_of_typedexpr(operand2.clone()).get_simpl()) {
-                            SimpleType::Option(_) => {
-                                panic!("Boiling still gave an Option SimpleType??")
-                            }
-                            SimpleType::Int => SimpleType::Int,
-                            SimpleType::Float => SimpleType::Float,
-                            SimpleType::Undefined => SimpleType::Undefined,
-                            SimpleType::Pdf => SimpleType::Pdf,
-                            _ => SimpleType::Bottom,
-                        };
+                    let simpl1 = match type_of_typedexpr(operand1.clone()).get_simpl() {
+                        SimpleType::Int => SimpleType::Int,
+                        SimpleType::Float => SimpleType::Float,
+                        SimpleType::Undefined => SimpleType::Undefined,
+                        SimpleType::Pdf => SimpleType::Pdf,
+                        _ => SimpleType::Bottom,
+                    };
+                    let simpl2 = match type_of_typedexpr(operand2.clone()).get_simpl() {
+                        SimpleType::Int => SimpleType::Int,
+                        SimpleType::Float => SimpleType::Float,
+                        SimpleType::Undefined => SimpleType::Undefined,
+                        SimpleType::Pdf => SimpleType::Pdf,
+                        _ => SimpleType::Bottom,
+                    };
                     let ty1 = Type(temporal_undefined.clone(), simpl1.clone());
                     let ty2 = Type(temporal_undefined.clone(), simpl2.clone());
                     let op1 = ast::new_texpr(
@@ -275,9 +265,6 @@ pub fn infer_expr(
                     )?;
 
                     let simpl = match (simpl1, simpl2) {
-                        (SimpleType::Option(_), _) | (_, SimpleType::Option(_)) => {
-                            panic!("Boiling still gave an Option SimpleType??")
-                        }
                         (SimpleType::Undefined, _) | (_, SimpleType::Undefined) => {
                             SimpleType::Undefined
                         }
@@ -324,11 +311,7 @@ pub fn infer_expr(
                     )?;
                     let op2 = operand2;
                     let Type(temp, simpl) = type_of_typedexpr(op2.clone());
-                    let t = if simpl.is_option() {
-                        Type(temp, simpl)
-                    } else {
-                        Type(temp, SimpleType::Option(Box::new(simpl)))
-                    };
+                    let t = Type(temp, simpl);
                     Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
                 }
                 Binop::Until => {
@@ -379,17 +362,13 @@ pub fn infer_expr(
             let operand1 = infer_expr(*e1, ctx, until_dependencies, udep_map)?;
             match u {
                 Unop::Neg => {
-                    let simpl1 =
-                        match types::boil_simple(type_of_typedexpr(operand1.clone()).get_simpl()) {
-                            SimpleType::Option(_) => {
-                                panic!("Boiling still gave an Option SimpleType??")
-                            }
-                            SimpleType::Int => SimpleType::Int,
-                            SimpleType::Float => SimpleType::Float,
-                            SimpleType::Undefined => SimpleType::Undefined,
-                            SimpleType::Pdf => SimpleType::Pdf,
-                            _ => SimpleType::Bottom,
-                        };
+                    let simpl1 = match type_of_typedexpr(operand1.clone()).get_simpl() {
+                        SimpleType::Int => SimpleType::Int,
+                        SimpleType::Float => SimpleType::Float,
+                        SimpleType::Undefined => SimpleType::Undefined,
+                        SimpleType::Pdf => SimpleType::Pdf,
+                        _ => SimpleType::Bottom,
+                    };
                     let ty1 = Type(temporal_undefined.clone(), simpl1);
                     let op1 = ast::new_texpr(
                         operand1,
@@ -555,8 +534,7 @@ pub fn infer_expr(
                 )?;
                 // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
                 // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
-                let simpl_return_type =
-                    SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
+                let simpl_return_type = type_of_typedexpr(typed_body.clone()).get_simpl();
 
                 local_context.add_name(
                     &name,
@@ -571,8 +549,7 @@ pub fn infer_expr(
 
             // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
             // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
-            let simpl_return_type =
-                SimpleType::Option(Box::new(type_of_typedexpr(typed_body.clone()).get_simpl()));
+            let simpl_return_type = type_of_typedexpr(typed_body.clone()).get_simpl();
 
             Ok(TypedExpr::TEPred(
                 name,
@@ -587,7 +564,7 @@ pub fn infer_expr(
     }
 }
 
-pub fn infer_command(
+fn infer_command(
     cmd: ast::Command,
     ctx: &mut TypeContext,
     udep_map: &mut HashMap<usize, ast::TypedExpr>,
@@ -744,7 +721,7 @@ pub fn infer_command(
 
             let free_vars = free_vars_of_command(&assertion);
             let target: Var = match assertion.clone() {
-                Command::Timestep | Command::Print(_) | Command::Assert(_) => {
+                Command::Timestep | Command::Print(_) | Command::Dist(_) | Command::Assert(_) => {
                     panic!("This shouldn't be inside a `Command:Assert`.")
                 }
                 Command::Global(v, _)
@@ -768,6 +745,17 @@ pub fn infer_command(
                 assertion, &mut local, udep_map, true,
             )?)))
         }
+        Command::Dist(e) => {
+            let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
+            if blank_until_dependencies.is_empty() {
+                Ok(TypedCommand::TDist(te))
+            } else {
+                Err(errors::TemporalConflictError {
+                    message: "Why are you trying to dist an until expression? Just simplify it..."
+                        .to_string(),
+                })?
+            }
+        }
     }
 }
 
@@ -782,7 +770,7 @@ pub fn infer_command(
     | x <- e        // Next(Until)
     | x <.. e       // Global(Future)
 */
-pub fn dupe_check_cmd(
+fn dupe_check_cmd(
     cmd: ast::Command,
     var_assign: &mut HashMap<ast::Var, (bool, bool, bool)>,
 ) -> Result<(), errors::DupeAssignError> {
@@ -843,11 +831,11 @@ pub fn dupe_check_cmd(
                 Ok(())
             }
         }
-        Command::Print(_) | Command::Assert(_) => Ok(()),
+        Command::Print(_) | Command::Dist(_) | Command::Assert(_) => Ok(()),
     }
 }
 
-pub fn dupe_check(block: Vec<ast::Command>) -> Result<(), errors::AssignError> {
+fn dupe_check(block: Vec<ast::Command>) -> Result<(), errors::AssignError> {
     // {var_name : (is_global, is_next_or_update, is_future)}
     let mut var_assign = HashMap::new();
     block
@@ -856,7 +844,7 @@ pub fn dupe_check(block: Vec<ast::Command>) -> Result<(), errors::AssignError> {
     Ok(())
 }
 
-pub fn infer_timeblock(
+fn infer_timeblock(
     block: Vec<ast::Command>,
     ctx: &mut TypeContext,
     udep_map: &mut HashMap<usize, ast::TypedExpr>,
@@ -870,7 +858,7 @@ pub fn infer_timeblock(
     cmds
 }
 
-pub fn free_vars_of_expr(e: ast::Expr) -> ast::FreeVars {
+fn free_vars_of_expr(e: ast::Expr) -> ast::FreeVars {
     use ast::Expr;
     match e {
         Expr::EConst(_) => ast::FreeVars::new(),
@@ -905,7 +893,7 @@ pub fn free_vars_of_expr(e: ast::Expr) -> ast::FreeVars {
     }
 }
 
-pub fn free_vars_of_command(cmd: &ast::Command) -> ast::FreeVars {
+fn free_vars_of_command(cmd: &ast::Command) -> ast::FreeVars {
     // todo: set subtraction if propositions are implemented. `f(x) = x * y` ==> `free_vars = {x, y} - {x} = {y}`
     use ast::Command;
     match cmd.clone() {
@@ -913,13 +901,13 @@ pub fn free_vars_of_command(cmd: &ast::Command) -> ast::FreeVars {
         Command::Global(_v, e) | Command::Next(_v, e) | Command::Update(_v, e) | Command::Finally(_v, e) => {
             free_vars_of_expr(e.clone())
         },
-        Command::Print(e) => free_vars_of_expr(e),
+        Command::Print(e) | Command::Dist(e) => free_vars_of_expr(e),
         Command::Assert(c) => free_vars_of_command(&*c)
     }
 }
 
 // doesn't capture "undefined variables" errors.
-pub fn defined_var_of_command(cmd: &ast::Command) -> Option<ast::Var> {
+fn defined_var_of_command(cmd: &ast::Command) -> Option<ast::Var> {
     use ast::Command;
     match cmd.clone() {
         Command::Timestep => panic!("Huh, timesteps should've been taken out with `split`... Why was `infer_command` called on one?"),
@@ -928,11 +916,12 @@ pub fn defined_var_of_command(cmd: &ast::Command) -> Option<ast::Var> {
         Command::Update(_v, _) => None,
         Command::Finally(v, _) => Some(v),
         Command::Print(_) => None,
-        Command::Assert(_) => None
+        Command::Assert(_) => None,
+        Command::Dist(_) => None
     }
 }
 
-pub fn arrange_by_dependencies(
+fn arrange_by_dependencies(
     block: Vec<ast::Command>,
 ) -> Result<Vec<ast::Command>, errors::CircularAssignError> {
     let a = block

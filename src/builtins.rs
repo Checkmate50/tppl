@@ -50,8 +50,6 @@ pub fn typecheck_builtin(
                 })?
             }
             match (args.get(0).unwrap().to_owned(), args.get(1).unwrap().to_owned()) {
-                (SimpleType::Option(a), b) => typecheck_builtin(name.clone(), vec![*a, b]),
-                (a, SimpleType::Option(b)) => typecheck_builtin(name.clone(), vec![a, *b]),
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
                 (a, b) if a == b => Ok(SimpleType::Bool),
@@ -72,8 +70,6 @@ pub fn typecheck_builtin(
                 })?
             }
             match (args.get(0).unwrap().to_owned(), args.get(1).unwrap().to_owned()) {
-                (SimpleType::Option(a), b) => typecheck_builtin(name.clone(), vec![*a, b]),
-                (a, SimpleType::Option(b)) => typecheck_builtin(name.clone(), vec![a, *b]),
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
                 (SimpleType::Int | SimpleType::Float, SimpleType::Int | SimpleType::Float) => Ok(SimpleType::Bool),
@@ -92,8 +88,6 @@ pub fn typecheck_builtin(
                 })?
             }
             match (args.get(0).unwrap().to_owned(), args.get(1).unwrap().to_owned()) {
-                (SimpleType::Option(a), b) => typecheck_builtin(name.clone(), vec![*a, b]),
-                (a, SimpleType::Option(b)) => typecheck_builtin(name.clone(), vec![a, *b]),
                 (SimpleType::Undefined, _) => Ok(SimpleType::Pdf),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Pdf),
                 (SimpleType::Int | SimpleType::Float | SimpleType::Pdf, SimpleType::Int | SimpleType::Float | SimpleType::Pdf) => Ok(SimpleType::Pdf),
@@ -112,7 +106,6 @@ pub fn typecheck_builtin(
                 })?
             }
             match args.get(0).unwrap().to_owned() {
-                SimpleType::Option(a) => typecheck_builtin(name.clone(), vec![*a]),
                 SimpleType::Undefined => Ok(SimpleType::Float),
                 SimpleType::Pdf => Ok(SimpleType::Float),
                 _ => Err(errors::ImproperCallError {
@@ -201,7 +194,7 @@ pub fn builtin_eq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
     }
 }
 
-pub fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
@@ -221,7 +214,7 @@ pub fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCo
     }
 }
 
-pub fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
@@ -240,7 +233,7 @@ pub fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
     }
 }
 
-pub fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
@@ -259,7 +252,7 @@ pub fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCo
     }
 }
 
-pub fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
@@ -278,7 +271,7 @@ pub fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
     }
 }
 
-pub fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
@@ -297,7 +290,7 @@ pub fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCo
     }
 }
 
-pub fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
@@ -319,7 +312,7 @@ pub fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::Simp
     }
 }
 
-pub fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
@@ -341,7 +334,7 @@ pub fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::Simpl
     }
 }
 
-pub fn builtin_sample(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+fn builtin_sample(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
     let mut rng = rand::thread_rng();
 
     let a = args.get(0).unwrap().to_owned();

@@ -7,11 +7,6 @@ pub enum SimpleType {
     Int,
     Pdf,
     Predicate(Vec<Box<SimpleType>>, Box<SimpleType>),
-    // currently, `interpreters::run_predicate_definitions` doesn't use `Option` in its fullness.
-    // It first checks if it's correct (ie. a "Some"). Then, it does type-checking.
-    // Failure is handled without using `Option` since `interpreters::is_success` pattern matches on texpr (ignoring type).
-    // Note: `ast::new_texpr` handles `Option(x) = false | x_instance`
-    Option(Box<SimpleType>), // these remind me of Python's Options atp. It isn't used as a tagged-sum.
     Undefined,
     Bottom,
 }
@@ -20,12 +15,6 @@ impl SimpleType {
     pub fn is_predicate(&self) -> bool {
         match self {
             SimpleType::Predicate(_, _) => true,
-            _ => false,
-        }
-    }
-    pub fn is_option(&self) -> bool {
-        match self {
-            SimpleType::Option(_) => true,
             _ => false,
         }
     }
@@ -178,8 +167,6 @@ pub fn resolve_simple_conflicts(
         })?,
         (_, SimpleType::Undefined) => Ok(a),
         (SimpleType::Undefined, _) => Ok(b),
-        (SimpleType::Option(a), b) => resolve_simple_conflicts(*a, b),
-        (a, SimpleType::Option(b)) => resolve_simple_conflicts(a, *b),
         (SimpleType::Predicate(arg_ts1, ret1), SimpleType::Predicate(arg_ts2, ret2)) => {
             let arg_ts: Result<Vec<SimpleType>, errors::SimpleConflictError> = arg_ts1
                 .into_iter()
@@ -209,18 +196,6 @@ pub fn constrain(ty: &Type, con_ty: &Type, msg: String) -> Result<Type, errors::
         })?,
         (SimpleType::Undefined, b) => b.to_owned(),
         (a, SimpleType::Undefined) => a.to_owned(),
-        (SimpleType::Option(a), b) => constrain(
-            &Type(temp1.to_owned(), *(a.to_owned())),
-            &Type(temp2.to_owned(), b.to_owned()),
-            msg.clone(),
-        )?
-        .get_simpl(),
-        (a, SimpleType::Option(b)) => constrain(
-            &Type(temp1.to_owned(), a.to_owned()),
-            &Type(temp2.to_owned(), *(b.to_owned())),
-            msg.clone(),
-        )?
-        .get_simpl(),
         (SimpleType::Predicate(args_types1, ret1), SimpleType::Predicate(args_types2, ret2)) => {
             let arg_ts: Result<Vec<Type>, errors::ConstrainError> = args_types1
                 .iter()
@@ -271,11 +246,4 @@ pub fn constrain(ty: &Type, con_ty: &Type, msg: String) -> Result<Type, errors::
     };
 
     Ok(Type(temp.to_owned(), simp))
-}
-
-pub fn boil_simple(t: SimpleType) -> SimpleType {
-    match t {
-        SimpleType::Option(a) => boil_simple(*a),
-        _ => t,
-    }
 }

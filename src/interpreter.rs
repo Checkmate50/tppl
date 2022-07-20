@@ -10,13 +10,13 @@ use crate::{ast_printer, errors};
 use ast::{TypedCommand, TypedExpr, Var};
 use types::{SimpleType, TemporalType, Type};
 
-pub type Value = (Type, TypedExpr);
+type Value = (Type, TypedExpr);
 
 type Count = u8;
 #[derive(Clone, PartialEq, Debug)]
-pub struct VarContext {
+struct VarContext {
     // Vec<ValueID> rather than HashSet<ValueID> since the length will be at most 3, so "O(n) vs O(1) remove" doesn't mean anything.
-    pub vars: HashMap<Var, (Vec<(TemporalType, TypedExpr)>, SimpleType)>,
+    vars: HashMap<Var, (Vec<(TemporalType, TypedExpr)>, SimpleType)>,
     /*
     Of the form (independent, dependencies).
     For example, ```
@@ -24,16 +24,16 @@ pub struct VarContext {
         a = x <!> y
     ``` would be `{y: {x, a}, c : {x}}`
     */
-    pub until_dependencies_tracker: HashMap<Var, HashMap<Var, Count>>,
+    until_dependencies_tracker: HashMap<Var, HashMap<Var, Count>>,
     // key is `hash(texpr)` and value is `texpr`
-    pub udep_map: HashMap<usize, TypedExpr>,
+    udep_map: HashMap<usize, TypedExpr>,
     // VariableName : (TemporalTypeOfAssertion, ValueAsserted, was_satisfied_at_least_once)
-    pub assertions: HashMap<Var, Vec<(TemporalType, ast::TypedExpr, bool)>>,
-    pub clock: i32,
+    assertions: HashMap<Var, Vec<(TemporalType, ast::TypedExpr, bool)>>,
+    clock: i32,
 }
 
 impl VarContext {
-    pub fn look_up(&mut self, var_name: &Var) -> Result<Vec<Value>, errors::ExecutionTimeError> {
+    fn look_up(&mut self, var_name: &Var) -> Result<Vec<Value>, errors::ExecutionTimeError> {
         if builtins::is_builtin(var_name) {
             Err(errors::PredicateExprError {
                 message: format!(
@@ -92,7 +92,7 @@ impl VarContext {
         }
     }
 
-    pub fn add_var(
+    fn add_var(
         &mut self,
         var_name: &Var,
         data: &TypedExpr,
@@ -155,7 +155,7 @@ impl VarContext {
         }
     }
 
-    pub fn refresh_dependents(&mut self, var_name: &Var) -> Result<(), errors::ExecutionTimeError> {
+    fn refresh_dependents(&mut self, var_name: &Var) -> Result<(), errors::ExecutionTimeError> {
         if let Some(dependents) = self.until_dependencies_tracker.clone().get(var_name) {
             for (dep_name, _) in dependents.iter() {
                 let vars = &self.vars.clone();
@@ -171,10 +171,11 @@ impl VarContext {
                             .map(|until_cond| {
                                 let cond_texpr =
                                     Self::get_from_hashmap(udep_map, until_cond).unwrap();
-                                eval_expr(cond_texpr.to_owned(), &mut context_clone)
+                                eval_expr(cond_texpr.to_owned(), &mut context_clone, false)
                             })
                             .collect();
-                        if evaled_conds?.into_iter().any(boolify) {
+                        // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
+                        if evaled_conds?.into_iter().map(Option::unwrap).any(boolify) {
                             self.destruct_value(
                                 dep_name.clone(),
                                 (temp.to_owned(), texpr.to_owned()),
@@ -187,7 +188,7 @@ impl VarContext {
         Ok(())
     }
 
-    pub fn age_values(
+    fn age_values(
         &mut self,
         temp_texpr_pairs: Vec<(TemporalType, TypedExpr)>,
         name: String,
@@ -205,7 +206,9 @@ impl VarContext {
                     // NEXT -> CURRENT. no need to do CURRENT -> EXPIRED since expired doesn't affect until_conds, and current would've already.
                     nexts.push(name.clone());
                 }
-                types::resolve_temporal_conflicts(aged_temps.clone(), aged_temp.clone(), false)?;
+                if !type_of_typedexpr(te.clone()).get_simpl().is_predicate() {
+                    types::resolve_temporal_conflicts(aged_temps.clone(), aged_temp.clone(), false)?;
+                }
                 aged_temps.push(aged_temp.clone());
                 aged_pairs.push((aged_temp, te));
             } else {
@@ -215,7 +218,7 @@ impl VarContext {
         Ok((aged_pairs, nexts))
     }
 
-    pub fn add_assertion(&mut self, assertion: TypedCommand) -> () {
+    fn add_assertion(&mut self, assertion: TypedCommand) -> () {
         match assertion {
             TypedCommand::TGlobal(name, texpr) | TypedCommand::TNext(name, texpr) | TypedCommand::TUpdate(name, texpr) | TypedCommand::TFinally(name, texpr) => {
                 if let Some(asserts_de_name) = Self::get_from_hashmap(&self.assertions, &name) {
@@ -228,12 +231,12 @@ impl VarContext {
                     self.assertions.insert(name, [(ast::type_of_typedexpr(texpr.clone()).get_temporal(), ast::strip_untils_off_texpr(texpr), false)].to_vec());
                 }
             },
-            TypedCommand::TPrint(_) | TypedCommand::TAssert(_) => panic!("This should've been caught during parsing. Assertions shouldn't assert prints/assertions. `assert(assert(3))` `assert(print(3))`???")
+            TypedCommand::TPrint(_) | TypedCommand::TDist(_) | TypedCommand::TAssert(_) => panic!("This should've been caught during parsing. Assertions shouldn't assert prints/assertions/dist. `assert(assert(3))` `assert(print(3))` `assert(dist(uniform))`???")
 
         };
     }
 
-    pub fn refresh_assertions(&mut self) -> Result<(), errors::ExecutionTimeError> {
+    fn refresh_assertions(&mut self) -> Result<(), errors::ExecutionTimeError> {
         let aged = self
             .assertions
             .clone()
@@ -264,8 +267,9 @@ impl VarContext {
                 let asserts_de_name:Vec<(TemporalType, TypedExpr, bool)> = assertion.into_iter()
                     .map(|(temp, texpr, was_satisfied)| {
                     if let Some(until_conds) = temp.clone().is_until {
-                        let strong: Vec<TypedExpr> = until_conds.strong.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self)).collect::<Result<Vec<TypedExpr>, errors::ExecutionTimeError>>()?;
-                        let weak: Vec<TypedExpr> = until_conds.weak.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self)).collect::<Result<Vec<TypedExpr>, errors::ExecutionTimeError>>()?;
+                        // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
+                        let strong: Vec<TypedExpr> = until_conds.strong.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
+                        let weak: Vec<TypedExpr> = until_conds.weak.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
                         if strong.clone().into_iter().chain(weak.into_iter()).any(boolify) {
                             // an until_dependency was truthy
                             if strong.into_iter().all(boolify) {
@@ -302,7 +306,7 @@ impl VarContext {
         Ok(())
     }
 
-    pub fn run_assertions(&mut self) -> Result<(), errors::ExecutionTimeError> {
+    fn run_assertions(&mut self) -> Result<(), errors::ExecutionTimeError> {
         for (name, temp_assertion_pairs) in self.assertions.clone().into_iter() {
             let currents: Vec<(usize, (TemporalType, TypedExpr, bool))> = temp_assertion_pairs
                 .clone()
@@ -332,8 +336,9 @@ impl VarContext {
                             futures
                                 .into_iter()
                                 .map(
-                                    |(index, (_, texpr, was_sat))| match eval_expr(texpr, self) {
-                                        Ok(v) => Ok((index, v, was_sat)),
+                                    |(index, (_, texpr, was_sat))| match eval_expr(texpr, self, false) {
+                                        Ok(Some(v)) => Ok((index, v, was_sat)),
+                                        Ok(None) => panic!("shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`"),
                                         Err(e) => Err(e),
                                     },
                                 )
@@ -347,8 +352,9 @@ impl VarContext {
                         currents
                             .into_iter()
                             .map(
-                                |(index, (_, texpr, was_sat))| match eval_expr(texpr, self) {
-                                    Ok(v) => Ok((index, v, was_sat)),
+                                |(index, (_, texpr, was_sat))| match eval_expr(texpr, self, false) {
+                                    Ok(Some(v)) => Ok((index, v, was_sat)),
+                                    Ok(None) => panic!("shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`"),
                                     Err(e) => Err(e),
                                 },
                             )
@@ -369,8 +375,9 @@ impl VarContext {
                     Type(temporal_undefined, SimpleType::Undefined),
                 ),
                 self,
+                false
             ) {
-                Ok(texpr) => {
+                Ok(Some(texpr)) => {
                     if let Some((assertions_to_be_checked, temporarily_forgive)) =
                         assertions_to_be_checked
                     {
@@ -420,6 +427,7 @@ impl VarContext {
                         );
                     }
                 }
+                Ok(None) => panic!("shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`"),
                 Err(errors::ExecutionTimeError::Access(errors::AccessError::PredExpr(e))) => {
                     Err(e)?
                 }
@@ -429,7 +437,7 @@ impl VarContext {
         Ok(())
     }
 
-    pub fn step_time(&mut self) -> Result<(), errors::ExecutionTimeError> {
+    fn step_time(&mut self) -> Result<(), errors::ExecutionTimeError> {
         self.clock += 1;
 
         self.run_assertions()?;
@@ -460,7 +468,7 @@ impl VarContext {
         Ok(())
     }
 
-    pub fn add_until_dependencies(
+    fn add_until_dependencies(
         &mut self,
         target: &Var,
         until_dependencies: &types::UntilDependencies,
@@ -497,7 +505,7 @@ impl VarContext {
         }
     }
 
-    pub fn destruct_value(
+    fn destruct_value(
         &mut self,
         var_name: Var,
         temp_texpr: (TemporalType, TypedExpr),
@@ -508,8 +516,9 @@ impl VarContext {
         if let Some(until_conds) = temp.is_until {
             for strong in until_conds.strong.iter() {
                 let strong_cond_texpr = self.udep_map.get(strong).unwrap().clone();
-                let res = eval_expr(strong_cond_texpr, self)?;
-                if !(boolify(res)) {
+                let res = eval_expr(strong_cond_texpr, self, false)?;
+                // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
+                if !(boolify(res.unwrap())) {
                     Err(errors::SUntilConditionUnsatisfied
                         {message : format!("A StrongUntil condition was not satisfied by the time of the value's destruction.\n temp_texpr = {:?}\n unsatisfied_condition = {:?}", temp_texpr, strong)})?
                 }
@@ -559,7 +568,7 @@ impl VarContext {
         Ok(())
     }
 
-    pub fn detect_cycle_until_dep(&mut self, var_name: &Var) -> Result<(), errors::AssignError> {
+    fn detect_cycle_until_dep(&mut self, var_name: &Var) -> Result<(), errors::AssignError> {
         if let Some(direct_dependents) = self.until_dependencies_tracker.get(var_name) {
             let mut all_dependents: HashSet<String> = HashSet::new();
             let mut stack = [direct_dependents].to_vec();
@@ -587,7 +596,7 @@ impl VarContext {
     }
 }
 
-pub fn boolify(texpr: TypedExpr) -> bool {
+fn boolify(texpr: TypedExpr) -> bool {
     match texpr {
         TypedExpr::TEConst(c, _) => match c {
             ast::Const::Bool(b) => b,
@@ -599,19 +608,7 @@ pub fn boolify(texpr: TypedExpr) -> bool {
     }
 }
 
-pub fn is_success(texpr: TypedExpr) -> bool {
-    match texpr {
-        TypedExpr::TEConst(c, _) => match c {
-            ast::Const::Bool(b) => b,
-            ast::Const::Number(_) => true,
-            ast::Const::Float(_) => true,
-            ast::Const::Pdf(_) => true,
-        },
-        _ => panic!("Truthy-falsey not implemented yet for non-constants."),
-    }
-}
-
-pub fn get_most_immediate_texpr(
+fn get_most_immediate_texpr(
     values: &Vec<(TemporalType, TypedExpr)>,
 ) -> Option<(TemporalType, TypedExpr)> {
     use types::TemporalAvailability;
@@ -645,7 +642,7 @@ fn filter_out_nexts(
     only_currents
 }
 
-pub fn sort_texprs_by_immediacy(
+fn sort_texprs_by_immediacy(
     temp_texpr_pairs: &Vec<(TemporalType, TypedExpr)>,
 ) -> Option<Vec<(TemporalType, TypedExpr)>> {
     use types::TemporalAvailability;
@@ -667,7 +664,7 @@ pub fn sort_texprs_by_immediacy(
     }
 }
 
-pub fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
+fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
     match e {
         TypedExpr::TEConst(_, _) => ast::FreeVars::new(),
         TypedExpr::TEVar(v, _) => {
@@ -701,23 +698,24 @@ pub fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
     }
 }
 
-pub fn eval_expr(
+fn eval_expr(
     e: TypedExpr,
     ctx: &mut VarContext,
-) -> Result<TypedExpr, errors::ExecutionTimeError> {
+    is_pred: bool,
+) -> Result<Option<TypedExpr>, errors::ExecutionTimeError> {
     match e {
-        TypedExpr::TEConst(_, _) => Ok(e),
+        TypedExpr::TEConst(_, _) => Ok(Some(e)),
         TypedExpr::TEVar(var_name, t) => {
             // any `FOL` violations should've been caught at CompileTime.
 
             let values: Vec<Value> = ctx.look_up(&var_name)?;
             let (ty, texpr) = values.get(0).unwrap();
             if types::is_currently_available(&ty.get_temporal()) {
-                Ok(ast::new_texpr(
+                Ok(Some(ast::new_texpr(
                     texpr.to_owned(),
                     t,
                     "Variable gave unexpected type.".to_string(),
-                )?)
+                )?))
             } else {
                 Err(errors::CurrentlyUnavailableError{message : format!("You tried access a value that's only available in the next timestep... Temporal Type was {:?}", ty).to_string()})?
             }
@@ -729,117 +727,214 @@ pub fn eval_expr(
             // only desiring constants is gucci since we're only using FOL. Thus, we can't have "propositions as values."
             // Sure, propositions are expressions, but stuff like returning a proposition?
             // `f(x) = x > .3 & g` is illegal if `g : proposition`
-            let c1 = match eval_expr(*e1, ctx)? {
-                TypedExpr::TEConst(c1, _) => c1,
-                a => panic!(
+            let c1: Option<Const> = match eval_expr(*e1, ctx, is_pred)? {
+                Some(TypedExpr::TEConst(c1, _)) => Some(c1),
+                Some(a) => panic!(
                     "{}",
                     format!(
                         "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
                         a
                     )
                 ),
+                None => None,
             };
 
-            // `And` is lazy.
-            let c2: Option<Const> = if b.clone() != Binop::And {
-                Some(match eval_expr(*e2.clone(), ctx)? {
-                    TypedExpr::TEConst(c2, _) => c2,
-                    b => panic!(
-                        "{}",
-                        format!(
-                            "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
-                            b
-                        )
-                    ),
-                })
-            } else {
-                None
-            };
-
-            let result: Const = match b {
-                Binop::Plus => arithmetic::add(c1, c2.unwrap())?,
-                Binop::Minus => arithmetic::sub(c1, c2.unwrap())?,
-                Binop::Times => arithmetic::mul(c1, c2.unwrap())?,
-                Binop::Div => arithmetic::div(c1, c2.unwrap())?,
-                Binop::Until | Binop::SUntil => match (c1.clone(), c2.clone().unwrap()) {
-                    (_, Const::Bool(cond)) => {
-                        if cond {
-                            Err(errors::UntilVoidError {
-                                message: "Until's condition is true by the time of evaluation"
-                                    .to_string(),
-                            })?
-                        } else {
-                            c1
-                        }
+            let result: Option<Const> = match b {
+                Binop::Plus => {
+                    let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
+                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(b) => panic!(
+                            "{}",
+                            format!(
+                                "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                b
+                            )
+                        ),
+                        None => None
+                    };
+                    match (c1, c2) {
+                        (Some(c1), Some(c2)) => Some(arithmetic::add(c1, c2)?),
+                        _ => None,
                     }
-                    _ => panic!(
-                        "(S)Until condition should be boolean! Not {:?}",
-                        c2.unwrap()
-                    ),
-                },
-                Binop::Or => match (c1.clone(), c2.clone().unwrap()) {
-                    (Const::Bool(b1), Const::Bool(_)) => {
-                        if b1 {
-                            c1
-                        } else {
+                }
+                Binop::Minus => {
+                    let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
+                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(b) => panic!(
+                            "{}",
+                            format!(
+                                "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                b
+                            )
+                        ),
+                        None => None
+                    };
+                    match (c1, c2) {
+                        (Some(c1), Some(c2)) => Some(arithmetic::sub(c1, c2)?),
+                        _ => None,
+                    }
+                }
+                Binop::Times => {
+                    let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
+                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(b) => panic!(
+                            "{}",
+                            format!(
+                                "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                b
+                            )
+                        ),
+                        None => None
+                    };
+                    match (c1, c2) {
+                        (Some(c1), Some(c2)) => Some(arithmetic::mul(c1, c2)?),
+                        _ => None,
+                    }
+                }
+                Binop::Div => {
+                    let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
+                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(b) => panic!(
+                            "{}",
+                            format!(
+                                "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                b
+                            )
+                        ),
+                        None => None
+                    };
+                    match (c1, c2) {
+                        (Some(c1), Some(c2)) => Some(arithmetic::div(c1, c2)?),
+                        _ => None,
+                    }
+                }
+                Binop::Until | Binop::SUntil => {
+                    let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
+                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(b) => panic!(
+                            "{}",
+                            format!(
+                                "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                b
+                            )
+                        ),
+                        None => None
+                    };
+
+                    match (c1, c2.clone()) {
+                        (Some(c1), Some(Const::Bool(cond))) => {
+                            if cond {
+                                Err(errors::UntilVoidError {
+                                    message: "Until's condition is true by the time of evaluation"
+                                        .to_string(),
+                                })?
+                            } else {
+                                Some(c1)
+                            }
+                        }
+                        (Some(_), Some(_)) => panic!(
+                            "(S)Until condition should be boolean! Not {:?}",
                             c2.unwrap()
-                        }
+                        ),
+                        _ => None,
                     }
-                    _ => panic!("Type-checking failed??"),
-                },
-                Binop::And => match c1.clone() {
-                    Const::Bool(b1) => {
+                }
+                Binop::Or => {
+                    let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
+                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(b) => panic!(
+                            "{}",
+                            format!(
+                                "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                b
+                            )
+                        ),
+                        None => None
+                    };
+
+                    match (c1.clone(), c2.clone()) {
+                        (Some(Const::Bool(b1)), Some(Const::Bool(_))) => {
+                            if b1 {
+                                c1
+                            } else {
+                                c2
+                            }
+                        }
+                        (Some(_), Some(_)) => panic!("Type-checking failed??"),
+                        _ => None,
+                    }
+                }
+                Binop::And => match c1 {
+                    Some(Const::Bool(b1)) => {
                         if b1 {
-                            match eval_expr(*e2, ctx)? {
-                                    TypedExpr::TEConst(c2, _) => c2,
-                                    b => panic!(
+                            match eval_expr(*e2, ctx, is_pred)? {
+                                    Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                                    Some(b) => panic!(
                                         "{}",
                                         format!(
                                             "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
                                             b
                                         )
                                     ),
+                                    None => None
                                 }
                         } else {
-                            c1
+                            None
                         }
                     }
-                    _ => panic!("Type-checking failed??"),
+                    Some(_) => panic!("Type-checking failed??"),
+                    None => None,
                 },
             };
 
-            let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
-            Ok(ast::new_texpr(
-                constant,
-                t,
-                "Binop gave unexpected type.".to_string(),
-            )?)
+            Ok(if let Some(result) = result {
+                let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
+                Some(ast::new_texpr(
+                    constant,
+                    t,
+                    "Binop gave unexpected type.".to_string(),
+                )?)
+            } else {
+                None
+            })
         }
         TypedExpr::TEUnop(u, e1, t) => {
             use ast::Const;
             use ast::Unop;
 
-            let c = match eval_expr(*e1, ctx)? {
-                TypedExpr::TEConst(c, _) => c,
-                // todo: untils are later
-                _ => panic!("Did not receive a constant after evaluation."),
+            let c: Option<Const> = match eval_expr(*e1, ctx, is_pred)? {
+                Some(TypedExpr::TEConst(c, _)) => Some(c),
+                Some(_) => panic!("Did not receive a constant after evaluation."),
+                None => None,
             };
 
-            let result = match u {
-                Unop::Neg => arithmetic::add(Const::Float(0.0), c)?,
+            let result: Option<Const> = match u {
+                Unop::Neg => {
+                    if let Some(c) = c {
+                        Some(arithmetic::sub(Const::Number(0), c)?)
+                    } else {
+                        None
+                    }
+                }
                 Unop::Not => match c {
-                    Const::Bool(b) => Const::Bool(!b),
-                    Const::Number(_) | Const::Float(_) | Const::Pdf(_) => {
+                    Some(Const::Bool(b)) => Some(Const::Bool(!b)),
+                    Some(_) => {
                         panic!("Type-checking failed??")
                     }
+                    None => None,
                 },
             };
-            let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
-            Ok(ast::new_texpr(
-                constant,
-                t,
-                "Unop gave unexpected type.".to_string(),
-            )?)
+
+            Ok(if let Some(result) = result {
+                let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
+                Some(ast::new_texpr(
+                    constant,
+                    t,
+                    "Unop gave unexpected type.".to_string(),
+                )?)
+            } else {
+                None
+            })
         }
         TypedExpr::TEInput(t) => {
             let mut buffer = String::new();
@@ -847,7 +942,7 @@ pub fn eval_expr(
                 .read_line(&mut buffer)
                 .expect("Failed to read line.");
             if let Ok(n) = buffer.trim().parse() {
-                Ok(TypedExpr::TEConst(ast::Const::Number(n), t))
+                Ok(Some(TypedExpr::TEConst(ast::Const::Number(n), t)))
             } else {
                 Err(errors::InputError {
                     message: "Input is not an integer!".to_string(),
@@ -856,61 +951,69 @@ pub fn eval_expr(
         }
         TypedExpr::TECall(name, args, return_type) => {
             // this ain't lazy
-            let args: Result<Vec<TypedExpr>, errors::ExecutionTimeError> =
-                args.into_iter().map(|arg| eval_expr(arg, ctx)).collect();
-            let args: Vec<TypedExpr> = args?;
+            let args: Option<Vec<TypedExpr>> = args
+                .into_iter()
+                .map(|arg| eval_expr(arg, ctx, is_pred))
+                .collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?
+                .into_iter()
+                .collect();
 
-            let return_val: Result<TypedExpr, errors::ExecutionTimeError> =
-                if builtins::is_builtin(&name) {
-                    // don't need to constrain/check `return_type` since it's built-in.
-                    Ok(builtins::exec_builtin(name, args)?)
-                } else {
-                    // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
-                    let preds = ctx.look_up(&name)?;
+            if let Some(args) = args {
+                let return_val: Result<TypedExpr, errors::ExecutionTimeError> =
+                    if builtins::is_builtin(&name) {
+                        // don't need to constrain/check `return_type` since it's built-in.
+                        Ok(builtins::exec_builtin(name, args)?)
+                    } else {
+                        // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
+                        let preds = ctx.look_up(&name)?;
 
-                    let currents: Vec<Value> = preds
-                        .clone()
-                        .into_iter()
-                        .filter(|(Type(temp, _), _)| {
-                            temp.when_available == types::TemporalAvailability::Current
-                        })
-                        .collect();
-                    let futures: Vec<Value> = preds
-                        .into_iter()
-                        .filter(|(Type(temp, _), _)| {
-                            temp.when_available == types::TemporalAvailability::Future
-                        })
-                        .collect();
+                        let currents: Vec<Value> = preds
+                            .clone()
+                            .into_iter()
+                            .filter(|(Type(temp, _), _)| {
+                                temp.when_available == types::TemporalAvailability::Current
+                            })
+                            .collect();
+                        let futures: Vec<Value> = preds
+                            .into_iter()
+                            .filter(|(Type(temp, _), _)| {
+                                temp.when_available == types::TemporalAvailability::Future
+                            })
+                            .collect();
 
-                    let curr_successes =
-                        run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
+                        let curr_successes =
+                            run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
 
-                    if curr_successes.len() == 0 {
-                        let futu_successes = run_predicate_definitions(name, futures, args, ctx)?;
-                        if futu_successes.len() == 0 {
-                            Err(errors::NoPredicateError {
-                                message: "No Predicates succeeded".to_string(),
-                            })?
-                        } else if futu_successes.len() > 1 {
+                        if curr_successes.len() == 0 {
+                            let futu_successes =
+                                run_predicate_definitions(name, futures, args, ctx)?;
+                            if futu_successes.len() == 0 {
+                                Err(errors::NoPredicateError {
+                                    message: "No Predicates succeeded".to_string(),
+                                })?
+                            } else if futu_successes.len() > 1 {
+                                Err(errors::MultiplePredicateError {
+                                    message: "Multiple (future) Predicates succeeded".to_string(),
+                                })?
+                            } else {
+                                Ok(futu_successes.get(0).unwrap().to_owned())
+                            }
+                        } else if curr_successes.len() > 1 {
                             Err(errors::MultiplePredicateError {
-                                message: "Multiple (future) Predicates succeeded".to_string(),
+                                message: "Multiple (current) Predicates succeeded".to_string(),
                             })?
                         } else {
-                            Ok(futu_successes.get(0).unwrap().to_owned())
+                            Ok(curr_successes.get(0).unwrap().to_owned())
                         }
-                    } else if curr_successes.len() > 1 {
-                        Err(errors::MultiplePredicateError {
-                            message: "Multiple (current) Predicates succeeded".to_string(),
-                        })?
-                    } else {
-                        Ok(curr_successes.get(0).unwrap().to_owned())
-                    }
-                };
-            Ok(ast::new_texpr(
-                return_val?,
-                return_type,
-                "Predicate Invocation didn't return desired type.".to_string(),
-            )?)
+                    };
+                Ok(Some(ast::new_texpr(
+                    return_val?,
+                    return_type,
+                    "Predicate Invocation didn't return desired type.".to_string(),
+                )?))
+            } else {
+                Ok(None)
+            }
         }
         TypedExpr::TEPred(name, params, body, t) => {
             if builtins::is_builtin(&name) {
@@ -919,12 +1022,12 @@ pub fn eval_expr(
                         .to_string(),
                 })?
             }
-            Ok(TypedExpr::TEPred(name, params, body, t))
+            Ok(Some(TypedExpr::TEPred(name, params, body, t)))
         }
     }
 }
 
-pub fn run_predicate_definitions(
+fn run_predicate_definitions(
     name: Var,
     definitions: Vec<Value>,
     args: Vec<TypedExpr>,
@@ -955,8 +1058,9 @@ pub fn run_predicate_definitions(
                     local_context.add_var(param, &arg, &type_of_typedexpr(arg.clone()))?;
                 }
 
-                let val = eval_expr(*body, &mut local_context)?;
-                if is_success(val.clone()) {
+                let val = eval_expr(*body, &mut local_context, true)?;
+                if let Some(val) = val {
+                    // if successful
                     let type_checked_val = ast::new_texpr(
                         val,
                         Type(temporal_undefined.clone(), *ret),
@@ -980,34 +1084,31 @@ pub fn run_predicate_definitions(
     Ok(successes)
 }
 
-pub fn exec_command(
-    c: TypedCommand,
-    ctx: &mut VarContext,
-) -> Result<(), errors::ExecutionTimeError> {
+fn exec_command(c: TypedCommand, ctx: &mut VarContext) -> Result<(), errors::ExecutionTimeError> {
     match c {
         TypedCommand::TGlobal(v, texpr) => {
-            let val = eval_expr(texpr.clone(), ctx)?;
+            // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`")
+            let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
         }
         TypedCommand::TNext(v, texpr) => {
-            let val = eval_expr(texpr.clone(), ctx)?;
+            let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
         }
         TypedCommand::TUpdate(v, texpr) => {
-            let val = eval_expr(texpr.clone(), ctx)?;
+            let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
         }
         TypedCommand::TFinally(v, texpr) => {
-            let val = eval_expr(texpr.clone(), ctx)?;
+            let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(())
         }
         TypedCommand::TPrint(texpr) => {
-            // todo: handle pdfs and propositions when implemented
-            let c = match eval_expr(texpr.clone(), ctx)? {
+            let c = match eval_expr(texpr.clone(), ctx, false)?.unwrap() {
                 TypedExpr::TEConst(c, _) => c,
                 _ => panic!("Evaluation did not result in a constant."),
             };
@@ -1039,10 +1140,32 @@ pub fn exec_command(
             ctx.add_assertion(*assertion);
             Ok(())
         }
+        TypedCommand::TDist(texpr) => {
+            let c = match eval_expr(texpr.clone(), ctx, false)?.unwrap() {
+                TypedExpr::TEConst(c, _) => c,
+                _ => panic!("Evaluation did not result in a constant."),
+            };
+            match c {
+                ast::Const::Bool(_b) => {
+                    // true -> 1
+                    // false -> 0
+                }
+                ast::Const::Number(_n) => {
+                    // y = c
+                }
+                ast::Const::Float(_f) => {
+                    // y = c
+                }
+                ast::Const::Pdf(_d) => {
+                    // sample `d`s if directly graphing `d`s is impossible
+                }
+            };
+            Ok(())
+        }
     }
 }
 
-pub fn exec_time_block(
+fn exec_time_block(
     time_block: ast::TypedTimeBlock,
     ctx: &mut VarContext,
 ) -> Result<(), errors::ExecutionTimeError> {

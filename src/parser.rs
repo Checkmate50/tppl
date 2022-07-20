@@ -158,8 +158,8 @@ fn assignment_parser(
     assignment
 }
 
-pub fn command_parser(
-) -> impl Parser<lexer::Token, ast::Command, Error = Simple<lexer::Token>> + Clone {
+fn command_parser() -> impl Parser<lexer::Token, ast::Command, Error = Simple<lexer::Token>> + Clone
+{
     use lexer::Token;
 
     recursive(|_| {
@@ -176,11 +176,15 @@ pub fn command_parser(
             .ignore_then(expr_parser())
             .map(Command::Print);
 
+        let dist = just(Token::DIST)
+            .ignore_then(expr_parser())
+            .map(Command::Dist);
+
         let statement = timestep
-            .clone()
             .or(assertion)
             .or(assignment_parser())
-            .or(print.clone());
+            .or(print)
+            .or(dist);
 
         statement
     })

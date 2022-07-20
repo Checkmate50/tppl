@@ -57,6 +57,7 @@ pub enum Command {
     Finally(Var, Expr),
     Print(Expr),
     Assert(Box<Command>),
+    Dist(Expr),
 }
 
 pub type Program = Vec<Command>;
@@ -81,6 +82,7 @@ pub enum TypedCommand {
     TFinally(Var, TypedExpr),
     TPrint(TypedExpr),
     TAssert(Box<TypedCommand>),
+    TDist(TypedExpr),
 }
 
 // `y` is the free var in `f(x) = x * y`
@@ -139,12 +141,8 @@ pub fn new_texpr(
 
     match e.clone() {
         TypedExpr::TEConst(c, old_type) => {
-            if c == Const::Bool(false) && constraint.get_simpl().is_option() {
-                Ok(e)
-            } else {
-                let t = constrain(&old_type, &constraint, msg)?;
-                Ok(TypedExpr::TEConst(c, t))
-            }
+            let t = constrain(&old_type, &constraint, msg)?;
+            Ok(TypedExpr::TEConst(c, t))
         }
         TypedExpr::TEVar(v, old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
