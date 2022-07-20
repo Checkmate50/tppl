@@ -1,0 +1,13 @@
+print uniform(uniform(1, 2), 3)
+print uniform(1, uniform(2, 3))
+print uniform(uniform(1, 2), uniform(2, 3)) - 3
+
+print uniform(normal, 1) // error?
+
+print normal(uniform, 1)
+print normal(0, uniform)
+print normal(uniform, uniform)
+
+print normal(normal, 1)
+print normal(0, normal)
+print normal(normal, normal)

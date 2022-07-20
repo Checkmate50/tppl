@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 chumsky = "0.8.0"
 petgraph = "0.4.13"
+rand = "0.8.5"
+rand_distr = "0.4.3"

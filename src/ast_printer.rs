@@ -15,6 +15,15 @@ pub fn string_of_distribution(d: ast::Distribution) -> String {
             string_of_const(*std_dev)
         )
         .to_string(),
+        Distribution::List(consts) => format!(
+            "List({}, ...)",
+            consts
+                .iter()
+                .map(f64::to_string).take(3)
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+        .to_string(),
     }
 }
 

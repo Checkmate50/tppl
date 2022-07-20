@@ -6,6 +6,7 @@ use crate::{errors, types};
 pub enum Distribution {
     Uniform(Box<Const>, Box<Const>), // Uniform(lower: f64, upper: f64)
     Normal(Box<Const>, Box<Const>),  // Normal(mean: f64, std_dev: f64)
+    List(Vec<f64>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -225,6 +226,7 @@ pub fn string_of_const_type(c: &Const) -> String {
         Const::Pdf(d) => match d {
             Distribution::Uniform(_, _) => "Uniform".to_string(),
             Distribution::Normal(_, _) => "Normal".to_string(),
+            Distribution::List(_) => "List".to_string(),
         },
     }
 }

@@ -1,0 +1,22 @@
+a = uniform(1, 2)
+b = normal(1, 2)
+
+print a + uniform(3, 4)
+print a - uniform(3, 4)
+print a * uniform(3, 4)
+print a / uniform(3, 4)
+
+print b + uniform(3, 4)
+print b - uniform(3, 4)
+print b * uniform(3, 4)
+print b / uniform(3, 4)
+
+print a + normal(3, 4)
+print a - normal(3, 4)
+print a * normal(3, 4)
+print a / normal(3, 4)
+
+print b + normal(3, 4)
+print b - normal(3, 4)
+print b * normal(3, 4)
+print b / normal(3, 4)

@@ -21,3 +21,6 @@ print w + 2
 print w - 2
 print w * 2
 print w / 2
+
+a(x) = uniform(x, 2)
+print(a(3))

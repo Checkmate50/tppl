@@ -1,0 +1,4 @@
+print uniform(uniform(1, 2), uniform(2, 3)) + 3
+print uniform(uniform(1, 2), uniform(2, 3)) - 3
+print uniform(uniform(1, 2), uniform(2, 3)) * 3
+print uniform(uniform(1, 2), uniform(2, 3)) / 3

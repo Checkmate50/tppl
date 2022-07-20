@@ -5,10 +5,16 @@
 
 use std::collections::HashSet;
 
+use rand;
+use rand::seq::SliceRandom;
+use rand_distr::{self, Distribution};
+
 use crate::{ast, errors, types};
 
 pub fn is_builtin(name: &String) -> bool {
-    let builtins = HashSet::from(["eq", "neq", "lt", "lte", "gt", "gte", "uniform", "normal"]);
+    let builtins = HashSet::from([
+        "eq", "neq", "lt", "lte", "gt", "gte", "uniform", "normal", "sample",
+    ]);
     builtins.contains(name.as_str())
 }
 
@@ -70,10 +76,7 @@ pub fn typecheck_builtin(
                 (a, SimpleType::Option(b)) => typecheck_builtin(name.clone(), vec![a, *b]),
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
-                (SimpleType::Int, SimpleType::Int) => Ok(SimpleType::Bool),
-                (SimpleType::Int, SimpleType::Float) => Ok(SimpleType::Bool),
-                (SimpleType::Float, SimpleType::Int) => Ok(SimpleType::Bool),
-                (SimpleType::Float, SimpleType::Float) => Ok(SimpleType::Bool),
+                (SimpleType::Int | SimpleType::Float, SimpleType::Int | SimpleType::Float) => Ok(SimpleType::Bool),
                 _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `int -> int -> bool` but {:?} were provided.", name, args).to_string()})?,
             }
         }
@@ -93,11 +96,32 @@ pub fn typecheck_builtin(
                 (a, SimpleType::Option(b)) => typecheck_builtin(name.clone(), vec![a, *b]),
                 (SimpleType::Undefined, _) => Ok(SimpleType::Pdf),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Pdf),
-                (SimpleType::Int, SimpleType::Int) => Ok(SimpleType::Pdf),
-                (SimpleType::Int, SimpleType::Float) => Ok(SimpleType::Pdf),
-                (SimpleType::Float, SimpleType::Int) => Ok(SimpleType::Pdf),
-                (SimpleType::Float, SimpleType::Float) => Ok(SimpleType::Pdf),
+                (SimpleType::Int | SimpleType::Float | SimpleType::Pdf, SimpleType::Int | SimpleType::Float | SimpleType::Pdf) => Ok(SimpleType::Pdf),
                 _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `int -> int -> bool` but {:?} were provided.", name, args).to_string()})?,
+            }
+        }
+        "sample" => {
+            if args.len() != 1 {
+                Err(errors::ImproperCallError {
+                    message: format!(
+                        "Built-in Predicate {} requires 1 argument but {} were provided.",
+                        name,
+                        args.len()
+                    )
+                    .to_string(),
+                })?
+            }
+            match args.get(0).unwrap().to_owned() {
+                SimpleType::Option(a) => typecheck_builtin(name.clone(), vec![*a]),
+                SimpleType::Undefined => Ok(SimpleType::Float),
+                SimpleType::Pdf => Ok(SimpleType::Float),
+                _ => Err(errors::ImproperCallError {
+                    message: format!(
+                        "Built-in Predicate {} is of type `pdf -> float` but {:?} were provided.",
+                        name, args
+                    )
+                    .to_string(),
+                })?,
             }
         }
         _ => panic!("Name {} is not a built-in predicate...", name),
@@ -142,6 +166,9 @@ pub fn exec_builtin(
         }
         "normal" => {
             builtin_normal as fn(Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError>
+        }
+        "sample" => {
+            builtin_sample as fn(Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError>
         }
         _ => panic!("Name {} is not a built-in predicate...", name),
     };
@@ -274,18 +301,13 @@ pub fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::Simp
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
-        (ast::Const::Number(_), ast::Const::Number(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Uniform(Box::new(a), Box::new(b)),
-        )),
-        (ast::Const::Number(_), ast::Const::Float(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Uniform(Box::new(a), Box::new(b)),
-        )),
-        (ast::Const::Float(_), ast::Const::Number(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Uniform(Box::new(a), Box::new(b)),
-        )),
-        (ast::Const::Float(_), ast::Const::Float(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Uniform(Box::new(a), Box::new(b)),
-        )),
+        (
+            ast::Const::Number(_) | ast::Const::Float(_) | ast::Const::Pdf(_),
+            ast::Const::Number(_) | ast::Const::Float(_) | ast::Const::Pdf(_),
+        ) => Ok(ast::Const::Pdf(ast::Distribution::Uniform(
+            Box::new(a),
+            Box::new(b),
+        ))),
         (_, _) => Err(errors::SimpleConflictError {
             message: format!(
                 "{} and {} are not comparable with uniform",
@@ -301,18 +323,13 @@ pub fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::Simpl
     let a = args.get(0).unwrap().to_owned();
     let b = args.get(1).unwrap().to_owned();
     match (a.clone(), b.clone()) {
-        (ast::Const::Number(_), ast::Const::Number(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Normal(Box::new(a), Box::new(b)),
-        )),
-        (ast::Const::Number(_), ast::Const::Float(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Normal(Box::new(a), Box::new(b)),
-        )),
-        (ast::Const::Float(_), ast::Const::Number(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Normal(Box::new(a), Box::new(b)),
-        )),
-        (ast::Const::Float(_), ast::Const::Float(_)) => Ok(ast::Const::Pdf(
-            ast::Distribution::Normal(Box::new(a), Box::new(b)),
-        )),
+        (
+            ast::Const::Number(_) | ast::Const::Float(_) | ast::Const::Pdf(_),
+            ast::Const::Number(_) | ast::Const::Float(_) | ast::Const::Pdf(_),
+        ) => Ok(ast::Const::Pdf(ast::Distribution::Normal(
+            Box::new(a),
+            Box::new(b),
+        ))),
         (_, _) => Err(errors::SimpleConflictError {
             message: format!(
                 "{} and {} are not comparable with normal",
@@ -320,6 +337,74 @@ pub fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::Simpl
                 ast::string_of_const_type(&b)
             )
             .to_string(),
+        }),
+    }
+}
+
+pub fn builtin_sample(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
+    let mut rng = rand::thread_rng();
+
+    let a = args.get(0).unwrap().to_owned();
+    match a {
+        ast::Const::Pdf(d) => match d {
+            ast::Distribution::Uniform(low, high) => {
+                let low = match *low {
+                    ast::Const::Number(n) => n as f64,
+                    ast::Const::Float(f) => f,
+                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
+                        ast::Const::Number(n) => n as f64,
+                        ast::Const::Float(f) => f,
+                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
+                    },
+                    _ => panic!("Uniform's low was of unexpected type."),
+                };
+                let high = match *high {
+                    ast::Const::Number(n) => n as f64,
+                    ast::Const::Float(f) => f,
+                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
+                        ast::Const::Number(n) => n as f64,
+                        ast::Const::Float(f) => f,
+                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
+                    },
+                    _ => panic!("Uniform's high was of unexpected type."),
+                };
+
+                let dist = rand::distributions::Uniform::new_inclusive(low, high);
+                let f = dist.sample(&mut rng);
+                Ok(ast::Const::Float(f))
+            }
+            ast::Distribution::Normal(mean, std_dev) => {
+                let mean = match *mean {
+                    ast::Const::Number(n) => n as f64,
+                    ast::Const::Float(f) => f,
+                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
+                        ast::Const::Number(n) => n as f64,
+                        ast::Const::Float(f) => f,
+                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
+                    },
+                    _ => panic!("Normal's mean was of unexpected type."),
+                };
+                let std_dev = match *std_dev {
+                    ast::Const::Number(n) => n as f64,
+                    ast::Const::Float(f) => f,
+                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
+                        ast::Const::Number(n) => n as f64,
+                        ast::Const::Float(f) => f,
+                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
+                    },
+                    _ => panic!("Normal's std_dev was of unexpected type."),
+                };
+
+                let dist = rand_distr::Normal::new(mean, std_dev).unwrap();
+                let f = dist.sample(&mut rng);
+                Ok(ast::Const::Float(f))
+            }
+            ast::Distribution::List(v) => {
+                Ok(ast::Const::Float(v.choose(&mut rng).unwrap().to_owned()))
+            }
+        },
+        _ => Err(errors::SimpleConflictError {
+            message: format!("{} cannot be sampled", ast::string_of_const_type(&a),).to_string(),
         }),
     }
 }
