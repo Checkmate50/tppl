@@ -963,53 +963,141 @@ fn eval_expr(
                 .collect();
 
             if let Some(args) = args {
-                let return_val: Result<TypedExpr, errors::ExecutionTimeError> =
-                    if builtins::is_builtin(&name) {
-                        // don't need to constrain/check `return_type` since it's built-in.
-                        Ok(builtins::exec_builtin(name, args)?)
-                    } else {
-                        // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
-                        let preds = ctx.look_up(&name)?;
+                let is_dist_splatted: bool = args.clone().into_iter().any(|arg| {
+                    match ast::type_of_typedexpr(arg).get_simpl() {
+                        types::SimpleType::Pdf => true,
+                        _ => false,
+                    }
+                });
 
-                        let currents: Vec<Value> = preds
-                            .clone()
-                            .into_iter()
-                            .filter(|(Type(temp, _), _)| {
-                                temp.when_available == types::TemporalAvailability::Current
-                            })
-                            .collect();
-                        let futures: Vec<Value> = preds
-                            .into_iter()
-                            .filter(|(Type(temp, _), _)| {
-                                temp.when_available == types::TemporalAvailability::Future
-                            })
-                            .collect();
+                let return_val: Result<TypedExpr, errors::ExecutionTimeError> = if is_dist_splatted
+                {
+                    let curr_existing_val_temp = TemporalType {
+                        when_available: types::TemporalAvailability::Current,
+                        when_dissipates: types::TemporalPersistency::Always,
+                        is_until: None,
+                    };
 
-                        let curr_successes =
-                            run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
+                    let arg_streams: Vec<Vec<TypedExpr>> = args.into_iter().map(|arg| {
+                        match ast::type_of_typedexpr(arg.clone()).get_simpl() {
+                            SimpleType::Pdf => {
+                                match arg {
+                                    TypedExpr::TEConst(ast::Const::Pdf(d), _) => arithmetic::spam_sample(d, arithmetic::SAMPLE_N).into_iter().map(|f| TypedExpr::TEConst(ast::Const::Float(f), types::Type(curr_existing_val_temp.clone(), types::SimpleType::Float))).collect::<Vec<TypedExpr>>(),
+                                    _ => panic!("How did a value that's not a ast::teconst(ast::const::pdf) have type simpletype::pdf?")
+                                }
+                            },
+                            SimpleType::Float  => vec![arg; arithmetic::SAMPLE_N],
+                            SimpleType::Int => vec![arg; arithmetic::SAMPLE_N],
+                            SimpleType::Bool => vec![arg; arithmetic::SAMPLE_N],
+                            SimpleType::Predicate(_, _) | SimpleType::Undefined | SimpleType::Bottom => panic!("By the time of evaluation, these types shouldn't be used as an argument's type.")
+                        }
+                    }).collect();
 
-                        if curr_successes.len() == 0 {
-                            let futu_successes =
-                                run_predicate_definitions(name, futures, args, ctx)?;
-                            if futu_successes.len() == 0 {
-                                Err(errors::NoPredicateError {
-                                    message: "No Predicates succeeded".to_string(),
-                                })?
-                            } else if futu_successes.len() > 1 {
-                                Err(errors::MultiplePredicateError {
-                                    message: "Multiple (future) Predicates succeeded".to_string(),
-                                })?
-                            } else {
-                                Ok(futu_successes.get(0).unwrap().to_owned())
+                    let arg_sets: Vec<Vec<TypedExpr>> = (0..arg_streams[0].len())
+                        .map(|i| {
+                            arg_streams
+                                .iter()
+                                .map(|inner| inner[i].clone())
+                                .collect::<Vec<TypedExpr>>()
+                        })
+                        .collect();
+
+                    let results: Vec<Option<TypedExpr>> = arg_sets
+                        .into_iter()
+                        .map(|arg_set| {
+                            eval_expr(
+                                TypedExpr::TECall(
+                                    name.clone(),
+                                    arg_set,
+                                    types::Type(
+                                        types::TemporalType {
+                                            when_available: types::TemporalAvailability::Undefined,
+                                            when_dissipates: types::TemporalPersistency::Undefined,
+                                            is_until: None,
+                                        },
+                                        types::SimpleType::Undefined,
+                                    ),
+                                ),
+                                ctx,
+                                true,
+                            )
+                        })
+                        .collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?;
+
+                    // any `None`s should've been handled already since that's just a "no predicate definition matches" error.
+                    let consts: Vec<ast::Const> = results
+                        .into_iter()
+                        .map(|opt_texpr| match opt_texpr {
+                            Some(TypedExpr::TEConst(c, _)) => c,
+                            _ => panic!("should've received constants after evaluation"),
+                        })
+                        .collect();
+
+                    let list: Vec<f64> = consts
+                        .into_iter()
+                        .map(|c| match c {
+                            ast::Const::Bool(b) => {
+                                if b {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
                             }
-                        } else if curr_successes.len() > 1 {
+                            ast::Const::Float(f) => f,
+                            ast::Const::Number(n) => n as f64,
+                            ast::Const::Pdf(d) => arithmetic::spam_sample(d, 1)[0],
+                        })
+                        .collect();
+
+                    Ok(TypedExpr::TEConst(
+                        ast::Const::Pdf(ast::Distribution::List(list)),
+                        types::Type(curr_existing_val_temp, types::SimpleType::Pdf),
+                    ))
+                } else if builtins::is_builtin(&name) {
+                    // don't need to constrain/check `return_type` since it's built-in.
+                    Ok(builtins::exec_builtin(name, args)?)
+                } else {
+                    // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
+                    let preds = ctx.look_up(&name)?;
+
+                    let currents: Vec<Value> = preds
+                        .clone()
+                        .into_iter()
+                        .filter(|(Type(temp, _), _)| {
+                            temp.when_available == types::TemporalAvailability::Current
+                        })
+                        .collect();
+                    let futures: Vec<Value> = preds
+                        .into_iter()
+                        .filter(|(Type(temp, _), _)| {
+                            temp.when_available == types::TemporalAvailability::Future
+                        })
+                        .collect();
+
+                    let curr_successes =
+                        run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
+
+                    if curr_successes.len() == 0 {
+                        let futu_successes = run_predicate_definitions(name, futures, args, ctx)?;
+                        if futu_successes.len() == 0 {
+                            Err(errors::NoPredicateError {
+                                message: "No Predicates succeeded".to_string(),
+                            })?
+                        } else if futu_successes.len() > 1 {
                             Err(errors::MultiplePredicateError {
-                                message: "Multiple (current) Predicates succeeded".to_string(),
+                                message: "Multiple (future) Predicates succeeded".to_string(),
                             })?
                         } else {
-                            Ok(curr_successes.get(0).unwrap().to_owned())
+                            Ok(futu_successes.get(0).unwrap().to_owned())
                         }
-                    };
+                    } else if curr_successes.len() > 1 {
+                        Err(errors::MultiplePredicateError {
+                            message: "Multiple (current) Predicates succeeded".to_string(),
+                        })?
+                    } else {
+                        Ok(curr_successes.get(0).unwrap().to_owned())
+                    }
+                };
                 Ok(Some(ast::new_texpr(
                     return_val?,
                     return_type,

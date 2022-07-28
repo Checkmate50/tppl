@@ -49,7 +49,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
 fn lex_and_parse(src: &str) -> Option<ast::Program> {
     let (tokens, lex_errs) = lexer::lexer().parse_recovery(src);
     if lex_errs.len() > 0 {
@@ -123,7 +122,7 @@ fn draw(
                 .unwrap()
                 .to_owned();
 
-            let x_d = stats::range(xmin,xmax, DOMAIN_N);
+            let x_d = stats::range(xmin, xmax, DOMAIN_N);
 
             // x = [-2.1; -1.3; -0.4; 1.9; 5.1; 6.2];
             // x_d = range(-7, 11, length = 100)
@@ -133,17 +132,20 @@ fn draw(
             // # visualize the kernels
             // plot(x_d, dens, label = ["Gaussian", "Box", "Triangular"])
 
-            let data_set: Vec<(f32, f32)> = x_d.into_iter().map(|x| {
-                (
-                    x as f32,
-                    stats::kernel_density_estimation(
-                        x,
-                        0.05,
-                        observations.clone(),
-                        stats::Kernel::Gaussian,
-                    ) as f32,
-                )
-            }).collect();
+            let data_set: Vec<(f32, f32)> = x_d
+                .into_iter()
+                .map(|x| {
+                    (
+                        x as f32,
+                        stats::kernel_density_estimation(
+                            x,
+                            0.05,
+                            observations.clone(),
+                            stats::Kernel::Gaussian,
+                        ) as f32,
+                    )
+                })
+                .collect();
 
             let ymin = data_set
                 .iter()
@@ -157,8 +159,6 @@ fn draw(
                 .max_by(|a, b| a.partial_cmp(b).unwrap())
                 .unwrap()
                 .to_owned();
-
-
 
             let graph_file_name = format!("{}/{}.png", timeblock_dir.clone(), graph_i);
 

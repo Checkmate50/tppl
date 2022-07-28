@@ -396,6 +396,8 @@ pub fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
                 .collect::<Vec<f64>>()
         }
         ast::Distribution::List(v) => {
+            // note: if we do resize `v`, the order must also be random! bc `interpreters::eval_expr`'s predcall depends on random order.
+
             // let length = v.len();
             // let quotient = count / length;
             // let remainder = count % length;

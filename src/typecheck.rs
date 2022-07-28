@@ -432,13 +432,25 @@ fn infer_expr(
                 is_until: None,
             };
 
-            let typed_args: Result<Vec<TypedExpr>, CompileTimeError> = args
+            let typed_args: Vec<TypedExpr> = args
                 .into_iter()
                 .map(|e| infer_expr(e, ctx, until_dependencies, udep_map))
-                .collect();
+                .collect::<Result<Vec<TypedExpr>, CompileTimeError>>()?;
 
-            if builtins::is_builtin(&name) {
-                let typed_args = typed_args?;
+            let is_dist_splatted: bool = typed_args.clone().into_iter().any(|typed_arg| {
+                match ast::type_of_typedexpr(typed_arg).get_simpl() {
+                    types::SimpleType::Pdf => true,
+                    _ => false,
+                }
+            });
+
+            if is_dist_splatted {
+                Ok(TypedExpr::TECall(
+                    name,
+                    typed_args,
+                    Type(temporal_undefined, types::SimpleType::Pdf),
+                ))
+            } else if builtins::is_builtin(&name) {
                 let simpls: Vec<SimpleType> = typed_args
                     .clone()
                     .into_iter()
@@ -453,7 +465,7 @@ fn infer_expr(
             } else {
                 let Type(_, pred_simpl) = ctx.look_up(&name)?;
                 if let SimpleType::Predicate(params_ts, ret) = pred_simpl {
-                    let constrained_typed_args: Result<Vec<TypedExpr>, ConstrainError> = typed_args?
+                    let constrained_typed_args: Result<Vec<TypedExpr>, ConstrainError> = typed_args
                         .into_iter().zip(params_ts.into_iter())
                         .map(|(texpr, arg_simpl)| {
                             ast::new_texpr(

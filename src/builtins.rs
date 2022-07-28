@@ -5,11 +5,7 @@
 
 use std::collections::HashSet;
 
-use rand;
-use rand::seq::SliceRandom;
-use rand_distr::{self, Distribution};
-
-use crate::{ast, errors, types};
+use crate::{arithmetic, ast, errors, types};
 
 pub fn is_builtin(name: &String) -> bool {
     let builtins = HashSet::from([
@@ -335,67 +331,9 @@ fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
 }
 
 fn builtin_sample(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let mut rng = rand::thread_rng();
-
     let a = args.get(0).unwrap().to_owned();
     match a {
-        ast::Const::Pdf(d) => match d {
-            ast::Distribution::Uniform(low, high) => {
-                let low = match *low {
-                    ast::Const::Number(n) => n as f64,
-                    ast::Const::Float(f) => f,
-                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
-                        ast::Const::Number(n) => n as f64,
-                        ast::Const::Float(f) => f,
-                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
-                    },
-                    _ => panic!("Uniform's low was of unexpected type."),
-                };
-                let high = match *high {
-                    ast::Const::Number(n) => n as f64,
-                    ast::Const::Float(f) => f,
-                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
-                        ast::Const::Number(n) => n as f64,
-                        ast::Const::Float(f) => f,
-                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
-                    },
-                    _ => panic!("Uniform's high was of unexpected type."),
-                };
-
-                let dist = rand::distributions::Uniform::new_inclusive(low, high);
-                let f = dist.sample(&mut rng);
-                Ok(ast::Const::Float(f))
-            }
-            ast::Distribution::Normal(mean, std_dev) => {
-                let mean = match *mean {
-                    ast::Const::Number(n) => n as f64,
-                    ast::Const::Float(f) => f,
-                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
-                        ast::Const::Number(n) => n as f64,
-                        ast::Const::Float(f) => f,
-                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
-                    },
-                    _ => panic!("Normal's mean was of unexpected type."),
-                };
-                let std_dev = match *std_dev {
-                    ast::Const::Number(n) => n as f64,
-                    ast::Const::Float(f) => f,
-                    ast::Const::Pdf(d) => match builtin_sample([ast::Const::Pdf(d)].to_vec())? {
-                        ast::Const::Number(n) => n as f64,
-                        ast::Const::Float(f) => f,
-                        _ => panic!("`builtin_sample` should return only Numbers | Float."),
-                    },
-                    _ => panic!("Normal's std_dev was of unexpected type."),
-                };
-
-                let dist = rand_distr::Normal::new(mean, std_dev).unwrap();
-                let f = dist.sample(&mut rng);
-                Ok(ast::Const::Float(f))
-            }
-            ast::Distribution::List(v) => {
-                Ok(ast::Const::Float(v.choose(&mut rng).unwrap().to_owned()))
-            }
-        },
+        ast::Const::Pdf(d) => Ok(ast::Const::Float(arithmetic::spam_sample(d, 1)[0])),
         _ => Err(errors::SimpleConflictError {
             message: format!("{} cannot be sampled", ast::string_of_const_type(&a),).to_string(),
         }),

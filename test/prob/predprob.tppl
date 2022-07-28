@@ -1,0 +1,8 @@
+binary_step(x) = gte(x, 0.5) & 1
+binary_step(x) = lt(x, 0.5) & 0
+
+foo(x) = eq(x, 0) & uniform(-2, -1)
+foo(x) = eq(x, 1) & uniform(1, 2)
+
+
+dist foo(binary_step(uniform))
