@@ -2,9 +2,10 @@ use std::iter;
 
 use crate::{ast, errors};
 use ast::Const;
+// use rand::prelude::{IteratorRandom, SliceRandom};
 use rand_distr::Distribution;
 
-static SAMPLE_N: usize = 100;
+pub static SAMPLE_N: usize = 10_000;
 
 pub fn add(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
     match (a.clone(), b.clone()) {
@@ -316,7 +317,7 @@ fn pow(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
     }
 }
 
-fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
+pub fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
     let mut rng = rand::thread_rng();
     match d {
         ast::Distribution::Uniform(low, high) => {
@@ -394,6 +395,23 @@ fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
                 })
                 .collect::<Vec<f64>>()
         }
-        ast::Distribution::List(v) => v,
+        ast::Distribution::List(v) => {
+            // let length = v.len();
+            // let quotient = count / length;
+            // let remainder = count % length;
+
+            // let mut sample: Vec<f64> = Vec::new();
+            // for _ in 0..quotient {
+            //     // we don't need to shuffle here since this
+            //     sample.append(&mut v.into_iter().choose_multiple(&mut rng, length)); // maybe just do `sample.append(&mut v.clone())`
+            // }
+
+            // let (remaining_bit, _) = v.partial_shuffle(&mut rng, remainder);
+            // sample.append(&mut remaining_bit.to_vec());
+
+            // sample
+
+            v
+        }
     }
 }

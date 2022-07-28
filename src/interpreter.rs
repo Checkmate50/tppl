@@ -207,7 +207,11 @@ impl VarContext {
                     nexts.push(name.clone());
                 }
                 if !type_of_typedexpr(te.clone()).get_simpl().is_predicate() {
-                    types::resolve_temporal_conflicts(aged_temps.clone(), aged_temp.clone(), false)?;
+                    types::resolve_temporal_conflicts(
+                        aged_temps.clone(),
+                        aged_temp.clone(),
+                        false,
+                    )?;
                 }
                 aged_temps.push(aged_temp.clone());
                 aged_pairs.push((aged_temp, te));
@@ -1084,28 +1088,31 @@ fn run_predicate_definitions(
     Ok(successes)
 }
 
-fn exec_command(c: TypedCommand, ctx: &mut VarContext) -> Result<(), errors::ExecutionTimeError> {
+fn exec_command(
+    c: TypedCommand,
+    ctx: &mut VarContext,
+) -> Result<Option<(String, ast::Const)>, errors::ExecutionTimeError> {
     match c {
         TypedCommand::TGlobal(v, texpr) => {
             // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`")
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
-            Ok(())
+            Ok(None)
         }
         TypedCommand::TNext(v, texpr) => {
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
-            Ok(())
+            Ok(None)
         }
         TypedCommand::TUpdate(v, texpr) => {
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
-            Ok(())
+            Ok(None)
         }
         TypedCommand::TFinally(v, texpr) => {
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
-            Ok(())
+            Ok(None)
         }
         TypedCommand::TPrint(texpr) => {
             let c = match eval_expr(texpr.clone(), ctx, false)?.unwrap() {
@@ -1134,33 +1141,21 @@ fn exec_command(c: TypedCommand, ctx: &mut VarContext) -> Result<(), errors::Exe
                     ast_printer::string_of_distribution(d)
                 ),
             };
-            Ok(())
+            Ok(None)
         }
         TypedCommand::TAssert(assertion) => {
             ctx.add_assertion(*assertion);
-            Ok(())
+            Ok(None)
         }
         TypedCommand::TDist(texpr) => {
-            let c = match eval_expr(texpr.clone(), ctx, false)?.unwrap() {
+            let c: ast::Const = match eval_expr(texpr.clone(), ctx, false)?.unwrap() {
                 TypedExpr::TEConst(c, _) => c,
                 _ => panic!("Evaluation did not result in a constant."),
             };
-            match c {
-                ast::Const::Bool(_b) => {
-                    // true -> 1
-                    // false -> 0
-                }
-                ast::Const::Number(_n) => {
-                    // y = c
-                }
-                ast::Const::Float(_f) => {
-                    // y = c
-                }
-                ast::Const::Pdf(_d) => {
-                    // sample `d`s if directly graphing `d`s is impossible
-                }
-            };
-            Ok(())
+            Ok(Some((
+                ast_printer::string_of_expr(ast::expr_of_texpr(texpr)),
+                c,
+            )))
         }
     }
 }
@@ -1168,15 +1163,23 @@ fn exec_command(c: TypedCommand, ctx: &mut VarContext) -> Result<(), errors::Exe
 fn exec_time_block(
     time_block: ast::TypedTimeBlock,
     ctx: &mut VarContext,
-) -> Result<(), errors::ExecutionTimeError> {
+) -> Result<Vec<(String, ast::Const)>, errors::ExecutionTimeError> {
     println!("--------");
-    time_block
-        .iter()
-        .try_for_each(|cmd| exec_command(cmd.clone(), ctx))
+    let dist_block: Vec<(String, ast::Const)> = time_block
+        .into_iter()
+        .map(|cmd| exec_command(cmd, ctx))
+        .collect::<Result<Vec<Option<(String, ast::Const)>>, errors::ExecutionTimeError>>()?
+        .into_iter()
+        .filter_map(std::convert::identity)
+        .collect();
+
+    Ok(dist_block)
 }
 
 // todo: consider optimizing `udep_map` with reference counting.
-pub fn exec_program(pgrm: ast::TypedProgram) -> Result<(), errors::ExecutionTimeError> {
+pub fn exec_program(
+    pgrm: ast::TypedProgram,
+) -> Result<Vec<Vec<(String, ast::Const)>>, errors::ExecutionTimeError> {
     let mut ctx = VarContext {
         vars: HashMap::new(),
         until_dependencies_tracker: HashMap::new(),
@@ -1185,10 +1188,14 @@ pub fn exec_program(pgrm: ast::TypedProgram) -> Result<(), errors::ExecutionTime
         clock: 0,
     };
 
-    pgrm.code.iter().try_for_each(|tb| {
-        exec_time_block(tb.clone(), &mut ctx)?;
-        ctx.step_time()
-    })?;
+    let dist_queue: Vec<Vec<(String, ast::Const)>> = pgrm
+        .code
+        .into_iter()
+        .map(|tb| {
+            ctx.step_time()?;
+            exec_time_block(tb, &mut ctx)
+        })
+        .collect::<Result<Vec<Vec<(String, ast::Const)>>, errors::ExecutionTimeError>>()?;
 
     for (name, (temp_texpr_pairs, _)) in ctx.clone().vars.into_iter() {
         for pair in temp_texpr_pairs.into_iter() {
@@ -1220,5 +1227,6 @@ pub fn exec_program(pgrm: ast::TypedProgram) -> Result<(), errors::ExecutionTime
             .to_string(),
         })?
     }
-    Ok(())
+
+    Ok(dist_queue)
 }
