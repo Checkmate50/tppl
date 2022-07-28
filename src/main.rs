@@ -112,18 +112,18 @@ fn draw(
                 ast::Const::Pdf(d) => arithmetic::spam_sample(d, arithmetic::SAMPLE_N),
             };
 
-            let min = observations
+            let xmin = observations
                 .iter()
                 .min_by(|a, b| a.partial_cmp(b).unwrap())
                 .unwrap()
                 .to_owned();
-            let max = observations
+            let xmax = observations
                 .iter()
                 .max_by(|a, b| a.partial_cmp(b).unwrap())
                 .unwrap()
                 .to_owned();
 
-            let x_d = stats::range(min, max, DOMAIN_N);
+            let x_d = stats::range(xmin,xmax, DOMAIN_N);
 
             // x = [-2.1; -1.3; -0.4; 1.9; 5.1; 6.2];
             // x_d = range(-7, 11, length = 100)
@@ -133,7 +133,7 @@ fn draw(
             // # visualize the kernels
             // plot(x_d, dens, label = ["Gaussian", "Box", "Triangular"])
 
-            let data_set = x_d.into_iter().map(|x| {
+            let data_set: Vec<(f32, f32)> = x_d.into_iter().map(|x| {
                 (
                     x as f32,
                     stats::kernel_density_estimation(
@@ -143,7 +143,22 @@ fn draw(
                         stats::Kernel::Gaussian,
                     ) as f32,
                 )
-            });
+            }).collect();
+
+            let ymin = data_set
+                .iter()
+                .map(|(_, y)| y)
+                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap()
+                .to_owned();
+            let ymax = data_set
+                .iter()
+                .map(|(_, y)| y)
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap()
+                .to_owned();
+
+
 
             let graph_file_name = format!("{}/{}.png", timeblock_dir.clone(), graph_i);
 
@@ -162,7 +177,7 @@ fn draw(
                 .set_left_and_bottom_label_area_size::<u32>(20)
                 .x_label_area_size(30)
                 .y_label_area_size(30)
-                .build_cartesian_2d((min as f32)..(max as f32), -0.1f32..1f32)?;
+                .build_cartesian_2d((xmin as f32)..(xmax as f32), ymin..ymax)?;
             chart.configure_mesh().draw()?;
 
             chart
