@@ -1,1 +1,4 @@
 dist normal(uniform, 2)
+dist normal(uniform(uniform(uniform(uniform, 2), 3), 4), 2)
+---
+dist normal(1, 4)

@@ -86,7 +86,6 @@ fn draw(
     }
     let f_name_dir = format!("out/{}", f_name);
     if !std::path::Path::new(f_name_dir.as_str()).exists() {
-        println!("creating {}", f_name_dir);
         fs::create_dir(f_name_dir.clone())?;
     }
     let dir_root: String = version_range
@@ -104,7 +103,6 @@ fn draw(
 
     for (timeblock_num, graphs) in dist_queue.into_iter().enumerate() {
         let timeblock_dir = format!("{}/timeblock_{}", dir_root.clone(), timeblock_num.clone());
-        println!("asdkfjlsdk");
         fs::create_dir(timeblock_dir.clone())?;
         for (graph_i, (title, constant)) in graphs.into_iter().enumerate() {
             let observations: Vec<f64> = match constant {
@@ -152,8 +150,14 @@ fn draw(
             let root = BitMapBackend::new(graph_file_name.as_str(), (640, 480)).into_drawing_area();
             root.fill(&WHITE)?;
 
+            let title_size: i32 = if title.len() <= 36 {
+                50
+            } else {
+                50 * 36 / title.len() as i32
+            };
+
             let mut chart = ChartBuilder::on(&root)
-                .caption("y=x^2", ("sans-serif", 50).into_font())
+                .caption(title.clone(), ("sans-serif", title_size).into_font())
                 .margin::<u32>(5)
                 .set_left_and_bottom_label_area_size::<u32>(20)
                 .x_label_area_size(30)
@@ -163,7 +167,7 @@ fn draw(
 
             chart
                 .draw_series(LineSeries::new(data_set, &RED))?
-                .label("y = x^2")
+                .label("distribution")
                 .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RED));
 
             chart
