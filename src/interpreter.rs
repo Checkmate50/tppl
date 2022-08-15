@@ -40,18 +40,18 @@ impl VarContext {
                     "Name {} is taken by a builtin predicate. No need to internally look it up.",
                     var_name
                 )
-                .to_string(),
+                ,
             })?
         }
 
         if let Some((temp_texpr_pairs, simpl)) = self.vars.get(var_name) {
-            if filter_out_nexts(temp_texpr_pairs).len() == 0 {
+            if filter_out_nexts(temp_texpr_pairs).is_empty() {
                 Err(errors::CurrentlyUnavailableError {
                     message: format!(
                         "Name {} doesn't have any temporal types that are currently available.",
                         var_name
                     )
-                    .to_string(),
+                    ,
                 })?
             } else {
                 if simpl.is_predicate() {
@@ -68,7 +68,7 @@ impl VarContext {
                                 "Name {} doesn't have any temporal types that are currently available.",
                                 var_name
                             )
-                            .to_string(),
+                            ,
                         })?
                     }
                 } else {
@@ -80,14 +80,14 @@ impl VarContext {
                                 "Name {} doesn't have any temporal types that are currently available.",
                                 var_name
                             )
-                            .to_string(),
+                            ,
                         })?
                     }
                 }
             }
         } else {
             Err(errors::NameError {
-                message: format!("There is no variable with name {}", var_name).to_string(),
+                message: format!("There is no variable with name {}", var_name),
             })?
         }
     }
@@ -104,7 +104,7 @@ impl VarContext {
                     "Name {} can't be assigned to since it's the name of a built-in predicate.",
                     var_name
                 )
-                .to_string(),
+                ,
             })?
         }
 
@@ -126,7 +126,7 @@ impl VarContext {
                 temp_texpr_pairs.push((temp, data.to_owned()));
             }
             self.vars
-                .insert(var_name.to_owned(), (temp_texpr_pairs, simpl.to_owned()));
+                .insert(var_name.to_owned(), (temp_texpr_pairs, simpl));
         } else {
             self.vars.insert(
                 var_name.to_owned(),
@@ -221,7 +221,7 @@ impl VarContext {
         Ok((aged_pairs, nexts))
     }
 
-    fn add_assertion(&mut self, assertion: TypedCommand) -> () {
+    fn add_assertion(&mut self, assertion: TypedCommand) {
         match assertion {
             TypedCommand::TGlobal(name, texpr) | TypedCommand::TNext(name, texpr) | TypedCommand::TUpdate(name, texpr) | TypedCommand::TFinally(name, texpr) => {
                 if let Some(asserts_de_name) = Self::get_from_hashmap(&self.assertions, &name) {
@@ -248,11 +248,7 @@ impl VarContext {
                 let asserts_de_name = assertion
                     .into_iter()
                     .filter_map(|(temp, texpr, was_satisfied)| {
-                        if let Some(aged_temp) = types::advance_type(temp) {
-                            Some((aged_temp, texpr, was_satisfied))
-                        } else {
-                            None
-                        }
+                        types::advance_type(temp).map(|aged_temp| (aged_temp, texpr, was_satisfied))
                     })
                     .collect::<Vec<_>>();
                 if asserts_de_name.is_empty() {
@@ -279,7 +275,7 @@ impl VarContext {
                                 // all strongs (if they exist) are truthy
                                 Ok(None)
                             } else{
-                                Err(errors::SUntilConditionUnsatisfied{message:format!("An assertion of {} had an SUntil that was not satisfied by the time of destruction", name).to_string()})?
+                                Err(errors::SUntilConditionUnsatisfied{message:format!("An assertion of {} had an SUntil that was not satisfied by the time of destruction", name)})?
                             }
                         } else {
                             // no until_dependencies are truthy
@@ -291,7 +287,7 @@ impl VarContext {
                     }
                 }).collect::<Result<Vec<Option<(TemporalType, TypedExpr, bool)>>, errors::ExecutionTimeError>>()?
                 .into_iter()
-                .filter_map(|x| x)
+                .flatten()
                 .collect();
                 if asserts_de_name.is_empty() {
                     // no assertions (either pre or post until_checkup)
@@ -302,7 +298,7 @@ impl VarContext {
             }
         ).collect::<Result<Vec<Option<(String, Vec<(TemporalType, TypedExpr, bool)>)>>, errors::ExecutionTimeError>>()?
         .into_iter()
-        .filter_map(|x| x)
+        .flatten()
         .collect()
         ;
         self.assertions = until_checked;
@@ -395,7 +391,7 @@ impl VarContext {
                                     [named_const.clone(), ast::const_of_texpr(e)].to_vec();
                                 let equals: ast::Const = builtins::builtin_eq(operands)?;
                                 match equals {
-                                    ast::Const::Bool(b) => Ok((index, b.clone(), b || was_sat)),
+                                    ast::Const::Bool(b) => Ok((index, b, b || was_sat)),
                                     _ => panic!("Builtin_Eq returned a non-bool."),
                                 }
                             })
@@ -475,22 +471,20 @@ impl VarContext {
         &mut self,
         target: &Var,
         until_dependencies: &types::UntilDependencies,
-    ) -> () {
+    ) {
         let weak = HashSet::<_>::from_iter(
             until_dependencies
                 .weak
                 .iter()
                 .map(|id| self.udep_map.get(id).unwrap().to_owned())
-                .map(free_vars_of_texpr)
-                .flatten(),
+                .flat_map(free_vars_of_texpr),
         );
         let strong = HashSet::<_>::from_iter(
             until_dependencies
                 .strong
                 .iter()
                 .map(|id| self.udep_map.get(id).unwrap().to_owned())
-                .map(free_vars_of_texpr)
-                .flatten(),
+                .flat_map(free_vars_of_texpr),
         );
 
         // add to until_dependencies
@@ -576,7 +570,7 @@ impl VarContext {
             let mut all_dependents: HashSet<String> = HashSet::new();
             let mut stack = [direct_dependents].to_vec();
 
-            while stack.len() > 0 {
+            while !stack.is_empty() {
                 let dependents = stack.pop().unwrap();
                 for dep in dependents.iter().map(|(dep_name, _)| dep_name) {
                     if !all_dependents.contains(dep) {
@@ -616,7 +610,7 @@ fn get_most_immediate_texpr(
 ) -> Option<(TemporalType, TypedExpr)> {
     use types::TemporalAvailability;
     let most_immediate = values
-        .into_iter()
+        .iter()
         .max_by_key(|(temp, _)| match temp.when_available {
             TemporalAvailability::Current => 1,
             TemporalAvailability::Next => -1,
@@ -627,7 +621,7 @@ fn get_most_immediate_texpr(
         })?;
 
     if most_immediate.0.when_available == TemporalAvailability::Next {
-        return None;
+        None
     } else {
         Some(most_immediate.to_owned())
     }
@@ -637,7 +631,7 @@ fn filter_out_nexts(
     temp_texpr_pairs: &Vec<(TemporalType, TypedExpr)>,
 ) -> Vec<(TemporalType, TypedExpr)> {
     let only_currents: Vec<(TemporalType, TypedExpr)> = temp_texpr_pairs
-        .into_iter()
+        .iter()
         .filter(|(temp, _)| temp.when_available != types::TemporalAvailability::Next)
         .map(|tup| tup.to_owned())
         .collect();
@@ -652,8 +646,8 @@ fn sort_texprs_by_immediacy(
 
     let mut only_currents = filter_out_nexts(temp_texpr_pairs);
 
-    if only_currents.len() == 0 {
-        return None;
+    if only_currents.is_empty() {
+        None
     } else {
         only_currents.sort_by_key(|(temp, _)| match temp.when_available {
             TemporalAvailability::Current => 1,
@@ -672,7 +666,7 @@ fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
         TypedExpr::TEConst(_, _) => ast::FreeVars::new(),
         TypedExpr::TEVar(v, _) => {
             let mut free_vars = ast::FreeVars::new();
-            free_vars.insert(v.to_string());
+            free_vars.insert(v);
             free_vars
         }
         TypedExpr::TEBinop(_, e1, e2, _) => free_vars_of_texpr(*e1)
@@ -683,12 +677,12 @@ fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
         TypedExpr::TEInput(_) => ast::FreeVars::new(),
         TypedExpr::TECall(name, args, _) => {
             let name = HashSet::from([name]);
-            let free_vars = args.into_iter().fold(name, |vars, x| {
+            
+            args.into_iter().fold(name, |vars, x| {
                 vars.union(&free_vars_of_texpr(x))
                     .map(|v| v.to_owned())
                     .collect::<HashSet<Var>>()
-            });
-            free_vars
+            })
         }
         TypedExpr::TEPred(name, args, body, _) => {
             let body_free_vars = free_vars_of_texpr(*body);
@@ -720,7 +714,7 @@ fn eval_expr(
                     "Variable gave unexpected type.".to_string(),
                 )?))
             } else {
-                Err(errors::CurrentlyUnavailableError{message : format!("You tried access a value that's only available in the next timestep... Temporal Type was {:?}", ty).to_string()})?
+                Err(errors::CurrentlyUnavailableError{message : format!("You tried access a value that's only available in the next timestep... Temporal Type was {:?}", ty)})?
             }
         }
         TypedExpr::TEBinop(b, e1, e2, t) => {
@@ -1076,9 +1070,9 @@ fn eval_expr(
                     let curr_successes =
                         run_predicate_definitions(name.clone(), currents, args.clone(), ctx)?;
 
-                    if curr_successes.len() == 0 {
+                    if curr_successes.is_empty() {
                         let futu_successes = run_predicate_definitions(name, futures, args, ctx)?;
-                        if futu_successes.len() == 0 {
+                        if futu_successes.is_empty() {
                             Err(errors::NoPredicateError {
                                 message: "No Predicates succeeded".to_string(),
                             })?
@@ -1257,7 +1251,7 @@ fn exec_time_block(
         .map(|cmd| exec_command(cmd, ctx))
         .collect::<Result<Vec<Option<(String, ast::Const)>>, errors::ExecutionTimeError>>()?
         .into_iter()
-        .filter_map(std::convert::identity)
+        .flatten()
         .collect();
 
     Ok(dist_block)
@@ -1300,18 +1294,17 @@ pub fn exec_program(
                 "The following assertions were not satisfied by the end of the program.\n{}",
                 ctx.assertions
                     .into_iter()
-                    .map(|(name, asserts_de_name)| asserts_de_name
+                    .flat_map(|(name, asserts_de_name)| asserts_de_name
                         .into_iter()
                         .map(|(_, te, _)| (name.clone(), te))
                         .collect::<Vec<_>>())
-                    .flatten()
                     .map(|(name, te)| name
                         + ": "
                         + &ast_printer::string_of_expr(ast::expr_of_texpr(te)))
                     .collect::<Vec<_>>()
                     .join("\n")
             )
-            .to_string(),
+            ,
         })?
     }
 

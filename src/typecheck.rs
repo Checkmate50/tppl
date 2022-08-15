@@ -1082,6 +1082,6 @@ pub fn infer_program(program: ast::Program) -> Result<ast::TypedProgram, errors:
         .collect::<Result<_, _>>()?;
     Ok(ast::TypedProgram {
         code: inferred_program,
-        udep_map: udep_map,
+        udep_map
     })
 }
