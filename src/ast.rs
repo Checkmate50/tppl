@@ -228,33 +228,3 @@ pub fn string_of_const_type(c: &Const) -> String {
         },
     }
 }
-
-// pub fn expr_has_until(e: Expr) -> bool {
-//     match e {
-//         Expr::EConst(_) | Expr::EVar(_) => false,
-//         Expr::EInput => false,
-//         Expr::EBinop(b, e1, e2) => b == Binop::Until || b == Binop::SUntil || expr_has_until(*e1) || expr_has_until(*e2),
-//         Expr::EUnop(_, e1) => expr_has_until(*e1),
-//         Expr::ECall(_, _) => false, // sure, user could do `f(3 <!> y)`, but it's ignoreable for `expr_has_until`'s usecase.
-//         Expr::EPred(_, _, body) => expr_has_until(*body),
-//     }
-// }
-
-// pub fn expr_of_command(c: Command) -> Expr {
-//     match c {
-//         Command::Timestep => panic!("It's a Timestep. Atp, I might just get rid of `TimeStep`."),
-//         Command::Global(_, e) | Command::Next(_, e) | Command::Update(_, e) | Command::Finally(_, e) => e,
-//         Command::Print(e) => e,
-//         Command::Assert(cmd) => expr_of_command(*cmd),
-//     }
-// }
-// pub fn cmd_of_tcmd(tc: TypedCommand) -> Command {
-//     match tc {
-//         TypedCommand::TGlobal(v, te) => Command::Global(v, expr_of_texpr(te)),
-//         TypedCommand::TNext(v, te) => Command::Next(v, expr_of_texpr(te)),
-//         TypedCommand::TUpdate(v, te) => Command::Update(v, expr_of_texpr(te)),
-//         TypedCommand::TFinally(v, te) => Command::Finally(v, expr_of_texpr(te)),
-//         TypedCommand::TPrint(te) => Command::Print(expr_of_texpr(te)),
-//         TypedCommand::TAssert(inner_tc) => Command::Assert(Box::new(cmd_of_tcmd(*inner_tc))),
-//     }
-// }

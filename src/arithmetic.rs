@@ -271,9 +271,12 @@ pub fn div(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
 
 fn pow(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
     match (a.clone(), b.clone()) {
-        (Const::Number(n1), Const::Number(n2)) => {
-            Ok(Const::Number(i64::pow(n1, n2.try_into().unwrap())))
-        }
+        (Const::Number(n1), Const::Number(n2)) => Ok(Const::Number(i64::pow(
+            n1,
+            n2.try_into().expect(
+                format!("The power {n2} was too fat. It unfortunately didn't fit `u32`.").as_str(),
+            ),
+        ))),
         (Const::Number(n), Const::Float(f)) => Ok(pow(Const::Float(n as f64), Const::Float(f))?),
         (Const::Float(f), Const::Number(n)) => Ok(pow(Const::Float(f), Const::Float(n as f64))?),
         (Const::Float(f1), Const::Float(f2)) => Ok(Const::Float(f64::powf(f1, f2))),
@@ -389,8 +392,8 @@ pub fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
                 .zip(std_devs.into_iter())
                 .map(|(mean, std_dev)| {
                     // todo: better error handling for `rand_distr::Normal::new(_, _)`.
-                    let dist: rand_distr::Normal<f64> =
-                        rand_distr::Normal::new(mean, std_dev).unwrap();
+                    let dist: rand_distr::Normal<f64> = rand_distr::Normal::new(mean, std_dev)
+                        .expect(format!("std_dev {std_dev} ain't finite.").as_str());
                     dist.sample(&mut rng)
                 })
                 .collect::<Vec<f64>>()

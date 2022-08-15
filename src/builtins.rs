@@ -45,7 +45,7 @@ pub fn typecheck_builtin(
                     .to_string(),
                 })?
             }
-            match (args.get(0).unwrap().to_owned(), args.get(1).unwrap().to_owned()) {
+            match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
                 (a, b) if a == b => Ok(SimpleType::Bool),
@@ -65,7 +65,7 @@ pub fn typecheck_builtin(
                     .to_string(),
                 })?
             }
-            match (args.get(0).unwrap().to_owned(), args.get(1).unwrap().to_owned()) {
+            match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
                 (SimpleType::Int | SimpleType::Float, SimpleType::Int | SimpleType::Float) => Ok(SimpleType::Bool),
@@ -83,7 +83,7 @@ pub fn typecheck_builtin(
                     .to_string(),
                 })?
             }
-            match (args.get(0).unwrap().to_owned(), args.get(1).unwrap().to_owned()) {
+            match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
                 (SimpleType::Undefined, _) => Ok(SimpleType::Pdf),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Pdf),
                 (SimpleType::Int | SimpleType::Float | SimpleType::Pdf, SimpleType::Int | SimpleType::Float | SimpleType::Pdf) => Ok(SimpleType::Pdf),
@@ -101,7 +101,11 @@ pub fn typecheck_builtin(
                     .to_string(),
                 })?
             }
-            match args.get(0).unwrap().to_owned() {
+            match args
+                .get(0)
+                .expect("The if-length=2 check directly above failed...")
+                .to_owned()
+            {
                 SimpleType::Undefined => Ok(SimpleType::Float),
                 SimpleType::Pdf => Ok(SimpleType::Float),
                 _ => Err(errors::ImproperCallError {
@@ -170,8 +174,14 @@ pub fn exec_builtin(
 }
 
 pub fn builtin_eq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (ast::Const::Bool(b1), ast::Const::Bool(b2)) => Ok(ast::Const::Bool(b1 == b2)),
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 == n2)),
@@ -191,8 +201,14 @@ pub fn builtin_eq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
 }
 
 fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (ast::Const::Bool(b1), ast::Const::Bool(b2)) => Ok(ast::Const::Bool(b1 != b2)),
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 != n2)),
@@ -211,8 +227,14 @@ fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
 }
 
 fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 < n2)),
         (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) < f2)),
@@ -230,8 +252,14 @@ fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflic
 }
 
 fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 <= n2)),
         (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) <= f2)),
@@ -249,8 +277,14 @@ fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
 }
 
 fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 > n2)),
         (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) > f2)),
@@ -268,8 +302,14 @@ fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflic
 }
 
 fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (ast::Const::Number(n1), ast::Const::Number(n2)) => Ok(ast::Const::Bool(n1 >= n2)),
         (ast::Const::Number(n1), ast::Const::Float(f2)) => Ok(ast::Const::Bool((n1 as f64) >= f2)),
@@ -287,8 +327,14 @@ fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
 }
 
 fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (
             ast::Const::Number(_) | ast::Const::Float(_) | ast::Const::Pdf(_),
@@ -309,8 +355,14 @@ fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCo
 }
 
 fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
-    let b = args.get(1).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
+    let b = args
+        .get(1)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match (a.clone(), b.clone()) {
         (
             ast::Const::Number(_) | ast::Const::Float(_) | ast::Const::Pdf(_),
@@ -331,7 +383,10 @@ fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
 }
 
 fn builtin_sample(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflictError> {
-    let a = args.get(0).unwrap().to_owned();
+    let a = args
+        .get(0)
+        .expect("Arity check (typecheck_builtin) failed?")
+        .to_owned();
     match a {
         ast::Const::Pdf(d) => Ok(ast::Const::Float(arithmetic::spam_sample(d, 1)[0])),
         _ => Err(errors::SimpleConflictError {

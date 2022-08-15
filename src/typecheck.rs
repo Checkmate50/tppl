@@ -50,7 +50,7 @@ impl TypeContext {
                 if let Some(temp) = sort_types_by_immediacy(temps) {
                     // it's fine to give just one type rather than all since it's just type-checking rn. the important bit is `simpl`.
                     Ok(types::Type(
-                        temp.get(0).unwrap().to_owned(),
+                        temp.get(0).expect("How the heckings did an empty name (ie. a name associated with an empty Vec<Type>) get inside the type_context? Empty Vec<Type> should've been erased by `step_time`.").to_owned(),
                         simpl.to_owned(),
                     ))
                 } else {
@@ -470,7 +470,7 @@ fn infer_expr(
                         .map(|(texpr, arg_simpl)| {
                             ast::new_texpr(
                                 texpr,
-                                Type(temporal_ty_arg.clone(), *arg_simpl),
+                                Type(temporal_ty_arg.clone(), arg_simpl),
                                 "Somehow `typecheck::infer_expr` didn't give `Type(Temp:Und, Simpl::Arg's)`"
                                     .to_string(),
                             )
@@ -504,11 +504,7 @@ fn infer_expr(
             };
 
             // not inferring parameters rn.
-            let arg_types: Vec<Box<SimpleType>> = params
-                .iter()
-                .map(|_| Box::new(SimpleType::Undefined))
-                .collect();
-
+            let arg_types: Vec<SimpleType> = vec![SimpleType::Undefined; params.len()];
             let mut local_context = ctx.clone();
 
             // We don't know the return value of predicate, so we set it `SimpleType::Undefined` for now.
@@ -939,14 +935,23 @@ fn arrange_by_dependencies(
     let a = block
         .iter()
         .map(|cmd| (defined_var_of_command(cmd), cmd.clone()));
-    let defined_vars: ast::DefVars = HashSet::from_iter(
-        a.clone()
-            .filter(|(opt, _)| opt.is_some())
-            .map(|(opt, _)| opt.unwrap()),
-    );
+    let defined_vars: ast::DefVars = HashSet::from_iter(a.clone().filter_map(|(opt, _)| {
+        if let Some(name) = opt {
+            Some(name)
+        } else {
+            None
+        }
+    }));
     let delayed_commands: Vec<ast::Command> = a
-        .filter(|(opt, _)| opt.is_none())
-        .map(|(_, cmd)| cmd)
+        .filter_map(
+            |(opt, cmd)| {
+                if let Some(_) = opt {
+                    None
+                } else {
+                    Some(cmd)
+                }
+            },
+        )
         .collect();
 
     let free_vars_by_cmd: HashMap<Var, ast::FreeVars> = HashMap::from_iter(
@@ -965,8 +970,14 @@ fn arrange_by_dependencies(
                     )
                 },
             )
-            .filter(|(def_var, _)| def_var.is_some())
-            .map(|(def_var, free_vars)| (def_var.unwrap(), free_vars)), // if `defined_vars.contains(tup.0)`
+            .filter_map(|(def_var, free_vars)| {
+                // if `defined_vars.contains(tup.0)`
+                if let Some(def_var) = def_var {
+                    Some((def_var, free_vars))
+                } else {
+                    None
+                }
+            }),
     );
 
     // scan for recursive definitions. since `defined_vars_of_command` excludes next/update, all recursive definitions are blocked.
@@ -983,8 +994,12 @@ fn arrange_by_dependencies(
     for (origin, destinations) in free_vars_by_cmd.iter() {
         for dest in destinations {
             graph.add_edge(
-                *var_map.get(dest).unwrap(),
-                *var_map.get(origin).unwrap(),
+                *var_map
+                    .get(dest)
+                    .expect(format!("dest {:?} should've been added to var_map", dest).as_str()),
+                *var_map.get(origin).expect(
+                    format!("origin {:?} should've been added to var_map", origin).as_str(),
+                ),
                 1,
             );
         }
@@ -992,9 +1007,13 @@ fn arrange_by_dependencies(
 
     match toposort(&graph, None) {
         Ok(order) => {
-            let top_order: Vec<Var> = order
-                .iter()
-                .map(|node| graph.node_weight(node.clone()).unwrap().clone())
+            let top_order: Vec<&Var> = order
+                .into_iter()
+                .map(|node| {
+                    graph
+                        .node_weight(node)
+                        .expect("All the nodes should have weight.")
+                })
                 .collect();
 
             let mut cmd_by_var: HashMap<Var, Vec<ast::Command>> = HashMap::new();
@@ -1005,8 +1024,15 @@ fn arrange_by_dependencies(
             }
 
             let mut cmd_order: Vec<ast::Command> = Vec::new();
-            for var in top_order.iter() {
-                cmd_order.append(&mut cmd_by_var.get(var).unwrap().clone());
+            for var in top_order.into_iter() {
+                cmd_order.append(
+                    &mut cmd_by_var
+                        .get(var)
+                        .expect(
+                            format!("variable_name {var} should've been in `cmd_by_var`").as_str(),
+                        )
+                        .clone(),
+                );
             }
             cmd_order.append(&mut delayed_commands.clone());
             Ok(cmd_order)
@@ -1014,7 +1040,9 @@ fn arrange_by_dependencies(
         Err(err) => Err(errors::CircularAssignError {
             message: format!(
                 "Error: Graph has cycle with node: {}",
-                graph.node_weight(err.node_id()).unwrap().as_str()
+                graph
+                    .node_weight(err.node_id())
+                    .expect("All the nodes should have weight.")
             )
             .to_string(),
         }),

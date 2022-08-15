@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", ast_printer::string_of_program(funcs.clone()));
 
         let program_result = match typecheck::infer_program(funcs) {
-            Ok(ty_prog) => match interpreter::exec_program(ty_prog.clone()) {
+            Ok(ty_prog) => match interpreter::exec_program(ty_prog) {
                 Ok(dist_queue) => {
                     println!("Executed");
                     Ok(dist_queue)

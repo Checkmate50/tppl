@@ -6,13 +6,13 @@ pub enum SimpleType {
     Float,
     Int,
     Pdf,
-    Predicate(Vec<Box<SimpleType>>, Box<SimpleType>),
+    Predicate(Vec<SimpleType>, Box<SimpleType>),
     Undefined,
     Bottom,
 }
 
 impl SimpleType {
-    pub fn is_predicate(&self) -> bool {
+    pub const fn is_predicate(&self) -> bool {
         match self {
             SimpleType::Predicate(_, _) => true,
             _ => false,
@@ -85,9 +85,8 @@ impl Type {
 
 pub fn is_currently_available(ty: &TemporalType) -> bool {
     match ty.when_available {
-        TemporalAvailability::Current => true,
+        TemporalAvailability::Current | TemporalAvailability::Future => true,
         TemporalAvailability::Next => false,
-        TemporalAvailability::Future => true,
         TemporalAvailability::Undefined => panic!("The immediacy of `undefined` is meaningless."),
     }
 }
@@ -136,24 +135,31 @@ pub fn resolve_temporal_conflicts(
     candidate: TemporalType,
     forgive_until: bool,
 ) -> Result<Vec<TemporalType>, errors::TemporalConflictError> {
-    let mut resolved = Vec::new();
-    let mut temps = temps.clone();
-
-    while !temps.is_empty() {
-        let temp = temps.pop().unwrap();
-
-        if temp.when_available == candidate.when_available {
-            if !forgive_until || temp.is_until.is_none() {
-                Err(errors::TemporalConflictError {
-                    message: format!("Conflicting types {:?} and {:?}", temp, candidate)
-                        .to_string(),
-                })?
+    let resolved: Result<Vec<Option<TemporalType>>, errors::TemporalConflictError> = temps
+        .into_iter()
+        .map(|temp| {
+            if temp.when_available == candidate.when_available {
+                if !forgive_until || temp.is_until.is_none() {
+                    Err(errors::TemporalConflictError {
+                        message: format!("Conflicting types {:?} and {:?}", temp, candidate)
+                            .to_string(),
+                    })
+                } else {
+                    // I think it's fine to discard `temp` when it softly-clashes with `candidate` if the code reaches here.
+                    // `temp` is agreeable, so any hard-clashes that may occur are with `candidate`.
+                    Ok(None)
+                }
+            } else {
+                Ok(Some(temp))
             }
-        } else {
-            resolved.push(temp);
-        }
-    }
-    resolved.push(candidate);
+        })
+        .collect();
+
+    let mut resolved: Vec<TemporalType> = resolved?
+        .into_iter()
+        .filter_map(std::convert::identity)
+        .collect();
+    resolved.append(&mut vec![candidate]);
     Ok(resolved)
 }
 
@@ -171,11 +177,10 @@ pub fn resolve_simple_conflicts(
             let arg_ts: Result<Vec<SimpleType>, errors::SimpleConflictError> = arg_ts1
                 .into_iter()
                 .zip(arg_ts2.into_iter())
-                .map(|(a, b)| resolve_simple_conflicts(*a, *b))
+                .map(|(a, b)| resolve_simple_conflicts(a, b))
                 .collect();
-            let arg_ts: Vec<Box<SimpleType>> = arg_ts?.into_iter().map(|s| Box::new(s)).collect();
             Ok(SimpleType::Predicate(
-                arg_ts,
+                arg_ts?,
                 Box::new(resolve_simple_conflicts(*ret1, *ret2)?),
             ))
         }
@@ -202,14 +207,13 @@ pub fn constrain(ty: &Type, con_ty: &Type, msg: String) -> Result<Type, errors::
                 .zip(args_types2.iter())
                 .map(|(a, b)| {
                     constrain(
-                        &Type(temp1.clone(), *(a.to_owned())),
-                        &Type(temp2.clone(), *(b.to_owned())),
+                        &Type(temp1.clone(), a.to_owned()),
+                        &Type(temp2.clone(), b.to_owned()),
                         msg.clone(),
                     )
                 })
                 .collect();
-            let arg_ts: Vec<Box<SimpleType>> =
-                arg_ts?.iter().map(Type::get_simpl).map(Box::new).collect();
+            let arg_ts: Vec<SimpleType> = arg_ts?.iter().map(Type::get_simpl).collect();
             let ret = constrain(
                 &Type(temp1.clone(), *(ret1.to_owned())),
                 &Type(temp2.clone(), *(ret2.to_owned())),

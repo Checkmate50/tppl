@@ -1,3 +1,4 @@
 x = 3
-succ(x) = x + 1
-print succ(x + 2) // 6
+y = 2
+succ(x) = x + 1 + y
+print succ(x + 2) // 6 + 2

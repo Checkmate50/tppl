@@ -8,8 +8,8 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
 
     recursive(|expr: Recursive<Token, ast::Expr, Simple<lexer::Token>>| {
         let val = select! {
-            Token::Number(n) => Expr::EConst(ast::Const::Number(n.parse().unwrap())),
-            Token::Float(f) => Expr::EConst(ast::Const::Float(f.parse().unwrap())),
+            Token::Number(n) => Expr::EConst(ast::Const::Number(n.parse().expect("Token::Number (from lexing) didn't capture a proper integer."))),
+            Token::Float(f) => Expr::EConst(ast::Const::Float(f.parse().expect("Token::Float (from lexing) didn't capture a proper float."))),
             Token::TRUE => Expr::EConst(ast::Const::Bool(true)),
             Token::FALSE => Expr::EConst(ast::Const::Bool(false)),
             Token::Var(x) => Expr::EVar(x),

@@ -1,0 +1,5 @@
+y <X false
+---
+x = 3 <!> y
+---
+print x // this is fine since `y` isn't true. it's just undefined.

@@ -159,23 +159,22 @@ impl VarContext {
         if let Some(dependents) = self.until_dependencies_tracker.clone().get(var_name) {
             for (dep_name, _) in dependents.iter() {
                 let vars = &self.vars.clone();
-                let (temp_texpr_pairs, _) = Self::get_from_hashmap(vars, dep_name).unwrap();
+                let (temp_texpr_pairs, _) = Self::get_from_hashmap(vars, dep_name).expect("Name({dep_name}) isn't in `until_dependencies_tracker.get(Name({var_name}))`, but Name({dep_name}) is supposedly dependent on Name({var_name}).`.");
                 for (temp, texpr) in temp_texpr_pairs.iter() {
                     if let Some(until_conds) = temp.is_until.clone() {
                         let udep_map = &self.udep_map;
                         let mut context_clone = self.clone();
-                        let evaled_conds: Result<Vec<_>, errors::ExecutionTimeError> = until_conds
+                        let evaled_conds: Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError> = until_conds
                             .strong
                             .iter()
                             .chain(until_conds.weak.iter())
                             .map(|until_cond| {
                                 let cond_texpr =
-                                    Self::get_from_hashmap(udep_map, until_cond).unwrap();
+                                    Self::get_from_hashmap(udep_map, until_cond).expect("`udep_map` is missing `until_cond` {until_cond}. The only time `udep_map` is mutated (and shrunk) during run-time is `destruct_value`.");
                                 eval_expr(cond_texpr.to_owned(), &mut context_clone, false)
                             })
                             .collect();
-                        // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
-                        if evaled_conds?.into_iter().map(Option::unwrap).any(boolify) {
+                        if evaled_conds?.into_iter().map(|opt| opt.expect("`eval_expr` shouldn't have given any `None`s since those are only returned from `eval_expr(..., is_pred=true)` (ie. this should only occur when running a predicate_definition).")).any(boolify) {
                             self.destruct_value(
                                 dep_name.clone(),
                                 (temp.to_owned(), texpr.to_owned()),
@@ -1144,7 +1143,7 @@ fn run_predicate_definitions(
                     local_context.vars.remove(param);
                     let arg = ast::new_texpr(
                         arg,
-                        Type(temporal_undefined.clone(), *arg_t),
+                        Type(temporal_undefined.clone(), arg_t),
                         "Predicate didn't receive expected types of arguments.".to_string(),
                     )?;
                     local_context.add_var(param, &arg, &type_of_typedexpr(arg.clone()))?;
