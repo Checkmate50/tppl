@@ -42,7 +42,7 @@ pub enum TemporalAvailability {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TemporalPersistency {
     // Fleeting(n) where n is the number of timesteps until temporal_availability transformation? This would allow `x = e in the next two timesteps`
-    Fleeting, 
+    Fleeting,
     Lingering,
     Always,
     Undefined,
@@ -55,7 +55,7 @@ pub struct UntilDependencies {
 }
 
 impl UntilDependencies {
-    pub fn is_empty(&mut self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.weak.is_empty() && self.strong.is_empty()
     }
 }
@@ -64,7 +64,7 @@ impl UntilDependencies {
 pub struct TemporalType {
     pub when_available: TemporalAvailability,
     pub when_dissipates: TemporalPersistency,
-    pub is_until: Option<UntilDependencies>,
+    pub is_until: UntilDependencies,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -127,9 +127,9 @@ pub fn resolve_temporal_conflicts(
         .into_iter()
         .map(|temp| {
             if temp.when_available == candidate.when_available {
-                if !forgive_until || temp.is_until.is_none() {
+                if !forgive_until || temp.is_until.is_empty() {
                     Err(errors::TemporalConflictError {
-                        message: format!("Conflicting types {:?} and {:?}", temp, candidate)
+                        message: format!("Conflicting types {:?} and {:?}", temp, candidate),
                     })
                 } else {
                     // I think it's fine to discard `temp` when it softly-clashes with `candidate` if the code reaches here.
@@ -142,10 +142,7 @@ pub fn resolve_temporal_conflicts(
         })
         .collect();
 
-    let mut resolved: Vec<TemporalType> = resolved?
-        .into_iter()
-        .flatten()
-        .collect();
+    let mut resolved: Vec<TemporalType> = resolved?.into_iter().flatten().collect();
     resolved.append(&mut vec![candidate]);
     Ok(resolved)
 }
@@ -219,18 +216,18 @@ pub fn constrain(ty: &Type, con_ty: &Type, msg: String) -> Result<Type, errors::
             TemporalType {
                 when_available: TemporalAvailability::Undefined,
                 when_dissipates: TemporalPersistency::Undefined,
-                is_until: None,
+                is_until: _,
             },
             b,
-        ) => b,
+        ) if temp1.is_until.is_empty() => b,
         (
             a,
             TemporalType {
                 when_available: TemporalAvailability::Undefined,
                 when_dissipates: TemporalPersistency::Undefined,
-                is_until: None,
+                is_until: _,
             },
-        ) => a,
+        ) if temp2.is_until.is_empty() => a,
         // I doubt I'll need to add cases like `(Global, Current)`, but perhaps I'll need to
         (a, b) if a == b => a,
         _ => Err(errors::ConstrainError { message: msg })?,

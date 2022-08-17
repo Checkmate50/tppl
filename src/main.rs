@@ -24,12 +24,10 @@ struct Cli {
     kde: Option<stats::Kernel>,
 }
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-   let cli = <Cli as clap::Parser>::parse();
-   let f_name = cli.f_name;
-   let kde = cli.kde.unwrap_or(stats::Kernel::Gaussian);
-
+    let cli = <Cli as clap::Parser>::parse();
+    let f_name = cli.f_name;
+    let kde = cli.kde.unwrap_or(stats::Kernel::Gaussian);
 
     // let f_name = env::args().nth(1).expect("Expected file argument");
     let src = fs::read_to_string(f_name.clone()).expect("failed to read file");
@@ -56,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap()
                     .to_str()
                     .unwrap(),
-                kde
+                kde,
             )?,
             Err(e) => println!("{:?}", e),
         }
@@ -92,7 +90,7 @@ fn lex_and_parse(src: &str) -> Option<ast::Program> {
 fn draw(
     dist_queue: Vec<Vec<(String, ast::Const)>>,
     f_name: &str,
-    kde: stats::Kernel
+    kde: stats::Kernel,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use plotters::prelude::*;
 
@@ -154,12 +152,7 @@ fn draw(
                 .map(|x| {
                     (
                         x as f32,
-                        stats::kernel_density_estimation(
-                            x,
-                            0.05,
-                            observations.clone(),
-                            kde
-                        ) as f32,
+                        stats::kernel_density_estimation(x, 0.05, observations.clone(), kde) as f32,
                     )
                 })
                 .collect();

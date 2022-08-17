@@ -39,8 +39,7 @@ impl VarContext {
                 message: format!(
                     "Name {} is taken by a builtin predicate. No need to internally look it up.",
                     var_name
-                )
-                ,
+                ),
             })?
         }
 
@@ -50,8 +49,7 @@ impl VarContext {
                     message: format!(
                         "Name {} doesn't have any temporal types that are currently available.",
                         var_name
-                    )
-                    ,
+                    ),
                 })?
             } else {
                 if simpl.is_predicate() {
@@ -103,8 +101,7 @@ impl VarContext {
                 message: format!(
                     "Name {} can't be assigned to since it's the name of a built-in predicate.",
                     var_name
-                )
-                ,
+                ),
             })?
         }
 
@@ -137,9 +134,7 @@ impl VarContext {
             );
         }
 
-        if let Some(until_dependencies) = typ.get_temporal().is_until {
-            self.add_until_dependencies(var_name, &until_dependencies);
-        }
+        self.add_until_dependencies(var_name, &typ.get_temporal().is_until);
 
         self.detect_cycle_until_dep(var_name)?;
 
@@ -161,25 +156,23 @@ impl VarContext {
                 let vars = &self.vars.clone();
                 let (temp_texpr_pairs, _) = Self::get_from_hashmap(vars, dep_name).unwrap_or_else(|| panic!("Name({dep_name}) isn't in `until_dependencies_tracker.get(Name({var_name}))`, but Name({dep_name}) is supposedly dependent on Name({var_name}).`."));
                 for (temp, texpr) in temp_texpr_pairs.iter() {
-                    if let Some(until_conds) = temp.is_until.clone() {
-                        let udep_map = &self.udep_map;
-                        let mut context_clone = self.clone();
-                        let evaled_conds: Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError> = until_conds
-                            .strong
-                            .iter()
-                            .chain(until_conds.weak.iter())
-                            .map(|until_cond| {
-                                let cond_texpr =
-                                    Self::get_from_hashmap(udep_map, until_cond).unwrap_or_else(|| panic!("`udep_map` is missing `until_cond` {until_cond}. The only time `udep_map` is mutated (and shrunk) during run-time is `destruct_value`."));
-                                eval_expr(cond_texpr.to_owned(), &mut context_clone, false)
-                            })
-                            .collect();
-                        if evaled_conds?.into_iter().map(|opt| opt.expect("`eval_expr` shouldn't have given any `None`s since those are only returned from `eval_expr(..., is_pred=true)` (ie. this should only occur when running a predicate_definition).")).any(boolify) {
-                            self.destruct_value(
-                                dep_name.clone(),
-                                (temp.to_owned(), texpr.to_owned()),
-                            )?;
-                        }
+                    let until_conds = temp.is_until.clone();
+                    let mut context_clone = self.clone();
+                    let evaled_conds: Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError> = until_conds
+                        .strong
+                        .iter()
+                        .chain(until_conds.weak.iter())
+                        .map(|until_cond| {
+                            let cond_texpr =
+                                Self::get_from_hashmap(&self.udep_map, until_cond).unwrap_or_else(|| panic!("`udep_map` is missing `until_cond` {until_cond}. The only time `udep_map` is mutated (and shrunk) during run-time is `destruct_value`."));
+                            eval_expr(cond_texpr.to_owned(), &mut context_clone, false)
+                        })
+                        .collect();
+                    if evaled_conds?.into_iter().map(|opt| opt.expect("`eval_expr` shouldn't have given any `None`s since those are only returned from `eval_expr(..., is_pred=true)` (ie. this should only occur when running a predicate_definition).")).any(boolify) {
+                        self.destruct_value(
+                            dep_name.clone(),
+                            (temp.to_owned(), texpr.to_owned()),
+                        )?;
                     }
                 }
             }
@@ -265,24 +258,20 @@ impl VarContext {
             .map(|(name, assertion)| {
                 let asserts_de_name:Vec<(TemporalType, TypedExpr, bool)> = assertion.into_iter()
                     .map(|(temp, texpr, was_satisfied)| {
-                    if let Some(until_conds) = temp.clone().is_until {
-                        // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
-                        let strong: Vec<TypedExpr> = until_conds.strong.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).expect("udep_map's garbage collection deleted a referenced until_cond_expr.").to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
-                        let weak: Vec<TypedExpr> = until_conds.weak.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).expect("udep_map's garbage collection deleted a referenced until_cond_expr").to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
-                        if strong.clone().into_iter().chain(weak.into_iter()).any(boolify) {
-                            // an until_dependency was truthy
-                            if strong.into_iter().all(boolify) {
-                                // all strongs (if they exist) are truthy
-                                Ok(None)
-                            } else{
-                                Err(errors::SUntilConditionUnsatisfied{message:format!("An assertion of {} had an SUntil that was not satisfied by the time of destruction", name)})?
-                            }
-                        } else {
-                            // no until_dependencies are truthy
-                            Ok(Some((temp, texpr, was_satisfied)))
+                    let until_conds = temp.clone().is_until;
+                    // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
+                    let strong: Vec<TypedExpr> = until_conds.strong.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).expect("udep_map's garbage collection deleted a referenced until_cond_expr.").to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
+                    let weak: Vec<TypedExpr> = until_conds.weak.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).expect("udep_map's garbage collection deleted a referenced until_cond_expr").to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
+                    if strong.clone().into_iter().chain(weak.into_iter()).any(boolify) {
+                        // an until_dependency was truthy
+                        if strong.into_iter().all(boolify) {
+                            // all strongs (if they exist) are truthy
+                            Ok(None)
+                        } else{
+                            Err(errors::SUntilConditionUnsatisfied{message:format!("An assertion of {} had an SUntil that was not satisfied by the time of destruction", name)})?
                         }
                     } else {
-                        // no until dependencies
+                        // no until_dependencies are truthy (this includes the possibility that there were no until_dependencies)
                         Ok(Some((temp, texpr, was_satisfied)))
                     }
                 }).collect::<Result<Vec<Option<(TemporalType, TypedExpr, bool)>>, errors::ExecutionTimeError>>()?
@@ -365,7 +354,10 @@ impl VarContext {
             let temporal_undefined = TemporalType {
                 when_available: types::TemporalAvailability::Undefined,
                 when_dissipates: types::TemporalPersistency::Undefined,
-                is_until: None,
+                is_until: types::UntilDependencies {
+                    weak: Vec::new(),
+                    strong: Vec::new(),
+                },
             };
 
             match eval_expr(
@@ -510,21 +502,20 @@ impl VarContext {
         let (temp, _) = temp_texpr.clone();
 
         // check the Strong until_conditions if they're present
-        if let Some(until_conds) = temp.is_until {
-            for strong in until_conds.strong.iter() {
-                let strong_cond_texpr = self.udep_map.get(strong).unwrap().clone();
-                let res = eval_expr(strong_cond_texpr, self, false)?;
-                // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
-                if !(boolify(res.unwrap())) {
-                    Err(errors::SUntilConditionUnsatisfied
-                        {message : format!("A StrongUntil condition was not satisfied by the time of the value's destruction.\n temp_texpr = {:?}\n unsatisfied_condition = {:?}", temp_texpr, strong)})?
-                }
+        let until_conds = temp.is_until;
+        for strong in until_conds.strong.iter() {
+            let strong_cond_texpr = self.udep_map.get(strong).unwrap().clone();
+            let res = eval_expr(strong_cond_texpr, self, false)?;
+            // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
+            if !(boolify(res.unwrap())) {
+                Err(errors::SUntilConditionUnsatisfied
+                    {message : format!("A StrongUntil condition was not satisfied by the time of the value's destruction.\n temp_texpr = {:?}\n unsatisfied_condition = {:?}", temp_texpr, strong)})?
             }
+        }
 
-            // free until_cond_ids
-            for cond_id in until_conds.strong.iter().chain(until_conds.weak.iter()) {
-                self.udep_map.remove(cond_id);
-            }
+        // free until_cond_ids
+        for cond_id in until_conds.strong.iter().chain(until_conds.weak.iter()) {
+            self.udep_map.remove(cond_id);
         }
 
         // delete the value from `self`
@@ -619,10 +610,10 @@ fn get_most_immediate_texpr(
                 panic!("The immediacy of `undefined` is meaningless.")
             }
         })?;
-    
+
     match most_immediate.0.when_available {
         TemporalAvailability::Next(_) => None,
-        _ => Some(most_immediate.to_owned())
+        _ => Some(most_immediate.to_owned()),
     }
 }
 
@@ -633,7 +624,7 @@ fn filter_out_nexts(
         .iter()
         .filter_map(|(temp, texpr)| match temp.when_available {
             types::TemporalAvailability::Next(_) => None,
-            _ => Some((temp.to_owned(), texpr.to_owned()))
+            _ => Some((temp.to_owned(), texpr.to_owned())),
         })
         .collect();
 
@@ -678,7 +669,7 @@ fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
         TypedExpr::Input(_) => ast::FreeVars::new(),
         TypedExpr::Call(name, args, _) => {
             let name = HashSet::from([name]);
-            
+
             args.into_iter().fold(name, |vars, x| {
                 vars.union(&free_vars_of_texpr(x))
                     .map(|v| v.to_owned())
@@ -866,18 +857,22 @@ fn eval_expr(
                     Some(Const::Bool(b1)) => {
                         if b1 {
                             match eval_expr(*e2, ctx, is_pred)? {
-                                    Some(TypedExpr::Const(c2, _)) => Some(c2),
-                                    Some(b) => panic!(
-                                        "{}",
-                                        format!(
-                                            "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
-                                            b
-                                        )
-                                    ),
-                                    None => None
-                                }
+                                Some(TypedExpr::Const(c2, _)) => Some(c2),
+                                Some(b) => panic!(
+                                    "{}",
+                                    format!(
+                                        "Did not receive a constant after evaluation. Instead, recieved:\n {:?}",
+                                        b
+                                    )
+                                ),
+                                None => None
+                            }
                         } else {
-                            None
+                            if is_pred {
+                                None
+                            } else {
+                                c1
+                            }
                         }
                     }
                     Some(_) => panic!("Type-checking failed??"),
@@ -957,16 +952,22 @@ fn eval_expr(
                 .collect();
 
             if let Some(args) = args {
-                let is_dist_splatted: bool = args.clone().into_iter().any(|arg| 
-                    matches!(ast::type_of_typedexpr(arg).get_simpl(), types::SimpleType::Pdf)
-                );
+                let is_dist_splatted: bool = args.clone().into_iter().any(|arg| {
+                    matches!(
+                        ast::type_of_typedexpr(arg).get_simpl(),
+                        types::SimpleType::Pdf
+                    )
+                });
 
                 let return_val: Result<TypedExpr, errors::ExecutionTimeError> = if is_dist_splatted
                 {
                     let curr_existing_val_temp = TemporalType {
                         when_available: types::TemporalAvailability::Current,
                         when_dissipates: types::TemporalPersistency::Always,
-                        is_until: None,
+                        is_until: types::UntilDependencies {
+                            weak: Vec::new(),
+                            strong: Vec::new(),
+                        },
                     };
 
                     let arg_streams: Vec<Vec<TypedExpr>> = args.into_iter().map(|arg| {
@@ -1004,7 +1005,10 @@ fn eval_expr(
                                         types::TemporalType {
                                             when_available: types::TemporalAvailability::Undefined,
                                             when_dissipates: types::TemporalPersistency::Undefined,
-                                            is_until: None,
+                                            is_until: types::UntilDependencies {
+                                                weak: Vec::new(),
+                                                strong: Vec::new(),
+                                            },
                                         },
                                         types::SimpleType::Undefined,
                                     ),
@@ -1119,7 +1123,10 @@ fn run_predicate_definitions(
     let temporal_undefined = TemporalType {
         when_available: types::TemporalAvailability::Undefined,
         when_dissipates: types::TemporalPersistency::Undefined,
-        is_until: None,
+        is_until: types::UntilDependencies {
+            weak: Vec::new(),
+            strong: Vec::new(),
+        },
     };
 
     let mut successes: Vec<TypedExpr> = Vec::new();
@@ -1301,8 +1308,7 @@ pub fn exec_program(
                         + &ast_printer::string_of_expr(ast::expr_of_texpr(te)))
                     .collect::<Vec<_>>()
                     .join("\n")
-            )
-            ,
+            ),
         })?
     }
 

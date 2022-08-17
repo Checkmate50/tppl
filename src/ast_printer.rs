@@ -21,7 +21,7 @@ pub fn string_of_distribution(d: ast::Distribution) -> String {
                 .take(3)
                 .collect::<Vec<String>>()
                 .join(", ")
-        )
+        ),
     }
 }
 

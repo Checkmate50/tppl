@@ -41,7 +41,7 @@ pub fn typecheck_builtin(
                         "Built-in Predicate {} requires 2 arguments but {} were provided.",
                         name,
                         args.len()
-                    )
+                    ),
                 })?
             }
             match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
@@ -60,7 +60,7 @@ pub fn typecheck_builtin(
                         "Built-in Predicate {} requires 2 arguments but {} were provided.",
                         name,
                         args.len()
-                    )
+                    ),
                 })?
             }
             match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
@@ -77,7 +77,7 @@ pub fn typecheck_builtin(
                         "Built-in Predicate {} requires 2 arguments but {} were provided.",
                         name,
                         args.len()
-                    )
+                    ),
                 })?
             }
             match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
@@ -94,7 +94,7 @@ pub fn typecheck_builtin(
                         "Built-in Predicate {} requires 1 argument but {} were provided.",
                         name,
                         args.len()
-                    )
+                    ),
                 })?
             }
             match args
@@ -108,7 +108,7 @@ pub fn typecheck_builtin(
                     message: format!(
                         "Built-in Predicate {} is of type `pdf -> float` but {:?} were provided.",
                         name, args
-                    )
+                    ),
                 })?,
             }
         }
@@ -189,7 +189,7 @@ pub fn builtin_eq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
                 "{} and {} are not comparable with eq",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -214,7 +214,7 @@ fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
                 "{} and {} are not comparable with neq",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -238,7 +238,7 @@ fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflic
                 "{} and {} are not comparable with lt",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -262,7 +262,7 @@ fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
                 "{} and {} are not comparable with lte",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -286,7 +286,7 @@ fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflic
                 "{} and {} are not comparable with gt",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -310,7 +310,7 @@ fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
                 "{} and {} are not comparable with gte",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -337,7 +337,7 @@ fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCo
                 "{} and {} are not comparable with uniform",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -364,7 +364,7 @@ fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
                 "{} and {} are not comparable with normal",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -377,7 +377,7 @@ fn builtin_sample(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
     match a {
         ast::Const::Pdf(d) => Ok(ast::Const::Float(arithmetic::spam_sample(d, 1)[0])),
         _ => Err(errors::SimpleConflictError {
-            message: format!("{} cannot be sampled", ast::string_of_const_type(&a),)
+            message: format!("{} cannot be sampled", ast::string_of_const_type(&a),),
         }),
     }
 }

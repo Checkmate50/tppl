@@ -121,7 +121,10 @@ pub fn type_of_constant(c: Const) -> types::Type {
     let temporal_undefined = types::TemporalType {
         when_available: types::TemporalAvailability::Undefined,
         when_dissipates: types::TemporalPersistency::Undefined,
-        is_until: None,
+        is_until: types::UntilDependencies {
+            weak: Vec::new(),
+            strong: Vec::new(),
+        },
     };
 
     match c {
@@ -207,9 +210,7 @@ pub fn strip_untils_off_texpr(te: TypedExpr) -> TypedExpr {
                 t,
             ),
         },
-        TypedExpr::Unop(u, op1, t) => {
-            TypedExpr::Unop(u, Box::new(strip_untils_off_texpr(*op1)), t)
-        }
+        TypedExpr::Unop(u, op1, t) => TypedExpr::Unop(u, Box::new(strip_untils_off_texpr(*op1)), t),
         TypedExpr::Input(_) => te,
         TypedExpr::Call(_, _, _) => te,
         TypedExpr::Pred(_, _, _, _) => te,

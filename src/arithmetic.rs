@@ -71,7 +71,7 @@ pub fn add(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 "{} and {} are not operable with add.",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -151,7 +151,7 @@ pub fn sub(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 "{} and {} are not operable with sub.",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -204,7 +204,7 @@ pub fn mul(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 "{} and {} are not operable with mul.",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -258,7 +258,7 @@ pub fn div(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 "{} and {} are not operable with div.",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
@@ -267,9 +267,9 @@ fn pow(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
     match (a.clone(), b.clone()) {
         (Const::Number(n1), Const::Number(n2)) => Ok(Const::Number(i64::pow(
             n1,
-            n2.try_into().unwrap_or_else(|_|
-                panic!("The power {n2} was too fat. It unfortunately didn't fit `u32`."),
-            ),
+            n2.try_into().unwrap_or_else(|_| {
+                panic!("The power {n2} was too fat. It unfortunately didn't fit `u32`.")
+            }),
         ))),
         (Const::Number(n), Const::Float(f)) => Ok(pow(Const::Float(n as f64), Const::Float(f))?),
         (Const::Float(f), Const::Number(n)) => Ok(pow(Const::Float(f), Const::Float(n as f64))?),
@@ -308,7 +308,7 @@ fn pow(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 "{} and {} are not operable with pow.",
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
-            )
+            ),
         }),
     }
 }
