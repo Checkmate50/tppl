@@ -1,5 +1,6 @@
-use chumsky::{prelude::*, Stream};
-use std::{env, fs};
+use chumsky;
+use clap;
+use std::fs;
 
 // use crate::arithmetic::spam_sample;
 mod arithmetic;
@@ -16,8 +17,23 @@ mod types;
 
 const DOMAIN_N: i32 = 100;
 
+#[derive(clap::Parser)]
+#[clap(author, version, about, long_about = None)]
+struct Cli {
+    #[clap(value_parser)]
+    f_name: String,
+    #[clap(long, arg_enum, value_parser)]
+    kde: Option<stats::Kernel>,
+}
+
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let f_name = env::args().nth(1).expect("Expected file argument");
+   let cli = <Cli as clap::Parser>::parse();
+   let f_name = cli.f_name;
+   let kde = cli.kde.unwrap_or_else(|| stats::Kernel::Gaussian);
+
+
+    // let f_name = env::args().nth(1).expect("Expected file argument");
     let src = fs::read_to_string(f_name.clone()).expect("failed to read file");
 
     let prog = lex_and_parse(src.as_str());
@@ -42,6 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap()
                     .to_str()
                     .unwrap(),
+                kde
             )?,
             Err(e) => println!("{:?}", e),
         }
@@ -50,6 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn lex_and_parse(src: &str) -> Option<ast::Program> {
+    use chumsky::{prelude::*, Stream};
     let (tokens, lex_errs) = lexer::lexer().parse_recovery(src);
     if lex_errs.len() > 0 {
         println!("lexer errors {:?}", lex_errs);
@@ -76,6 +94,7 @@ fn lex_and_parse(src: &str) -> Option<ast::Program> {
 fn draw(
     dist_queue: Vec<Vec<(String, ast::Const)>>,
     f_name: &str,
+    kde: stats::Kernel
 ) -> Result<(), Box<dyn std::error::Error>> {
     use plotters::prelude::*;
 
@@ -141,7 +160,7 @@ fn draw(
                             x,
                             0.05,
                             observations.clone(),
-                            stats::Kernel::Gaussian,
+                            kde
                         ) as f32,
                     )
                 })

@@ -8,18 +8,18 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
 
     recursive(|expr: Recursive<Token, ast::Expr, Simple<lexer::Token>>| {
         let val = select! {
-            Token::Number(n) => Expr::EConst(ast::Const::Number(n.parse().expect("Token::Number (from lexing) didn't capture a proper integer."))),
-            Token::Float(f) => Expr::EConst(ast::Const::Float(f.parse().expect("Token::Float (from lexing) didn't capture a proper float."))),
-            Token::TRUE => Expr::EConst(ast::Const::Bool(true)),
-            Token::FALSE => Expr::EConst(ast::Const::Bool(false)),
-            Token::Var(x) => Expr::EVar(x),
-            Token::INPUT => Expr::EInput,
-            Token::UNIFORM => Expr::EConst(ast::Const::Pdf(
+            Token::Number(n) => Expr::Const(ast::Const::Number(n.parse().expect("Token::Number (from lexing) didn't capture a proper integer."))),
+            Token::Float(f) => Expr::Const(ast::Const::Float(f.parse().expect("Token::Float (from lexing) didn't capture a proper float."))),
+            Token::TRUE => Expr::Const(ast::Const::Bool(true)),
+            Token::FALSE => Expr::Const(ast::Const::Bool(false)),
+            Token::Var(x) => Expr::Var(x),
+            Token::INPUT => Expr::Input,
+            Token::UNIFORM => Expr::Const(ast::Const::Pdf(
                 ast::Distribution::Uniform(
                     Box::new(ast::Const::Number(0)), Box::new(ast::Const::Number(1)))
                 )
             ),
-            Token::NORMAL => Expr::EConst(ast::Const::Pdf(
+            Token::NORMAL => Expr::Const(ast::Const::Pdf(
                 ast::Distribution::Normal(
                     Box::new(ast::Const::Number(0)), Box::new(ast::Const::Number(1)))
                 )
@@ -36,7 +36,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
                         .allow_trailing()
                         .delimited_by(just(Token::LPAREN), just(Token::RPAREN)),
                 )
-                .map(|args| Expr::ECall("uniform".to_string(), args)),
+                .map(|args| Expr::Call("uniform".to_string(), args)),
             just(Token::NORMAL)
                 .ignore_then(
                     expr.clone()
@@ -45,7 +45,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
                         .allow_trailing()
                         .delimited_by(just(Token::LPAREN), just(Token::RPAREN)),
                 )
-                .map(|args| Expr::ECall("normal".to_string(), args)),
+                .map(|args| Expr::Call("normal".to_string(), args)),
         ));
 
         let ident = select! { Token::Var(ident) => ident.clone() };
@@ -56,7 +56,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
                     .allow_trailing()
                     .delimited_by(just(Token::LPAREN), just(Token::RPAREN)),
             )
-            .map(|(f, args)| Expr::ECall(f, args));
+            .map(|(f, args)| Expr::Call(f, args));
 
         let atom = call
             .or(pdf)
@@ -68,7 +68,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
             .or(just(Token::Op("!".to_owned())).to(ast::Unop::Not))
             .repeated()
             .then(atom)
-            .foldr(|op, rhs| Expr::EUnop(op, Box::new(rhs)));
+            .foldr(|op, rhs| Expr::Unop(op, Box::new(rhs)));
 
         // operations * and /
         let timesdiv = unary
@@ -80,7 +80,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
                     .then(unary)
                     .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::EBinop(op, Box::new(lhs), Box::new(rhs)));
+            .foldl(|lhs, (op, rhs)| Expr::Binop(op, Box::new(lhs), Box::new(rhs)));
 
         // operations + and -
         let plusminus = timesdiv
@@ -92,7 +92,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
                     .then(timesdiv)
                     .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::EBinop(op, Box::new(lhs), Box::new(rhs)));
+            .foldl(|lhs, (op, rhs)| Expr::Binop(op, Box::new(lhs), Box::new(rhs)));
 
         // operations & and |
         let andor = plusminus
@@ -104,7 +104,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
                     .then(plusminus)
                     .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::EBinop(op, Box::new(lhs), Box::new(rhs)));
+            .foldl(|lhs, (op, rhs)| Expr::Binop(op, Box::new(lhs), Box::new(rhs)));
 
         // operations <!> and <!!>
         let until = andor
@@ -116,7 +116,7 @@ fn expr_parser() -> impl Parser<lexer::Token, ast::Expr, Error = Simple<lexer::T
                     .then(andor)
                     .repeated(),
             )
-            .foldl(|lhs, (op, rhs)| Expr::EBinop(op, Box::new(lhs), Box::new(rhs)));
+            .foldl(|lhs, (op, rhs)| Expr::Binop(op, Box::new(lhs), Box::new(rhs)));
 
         until.labelled("expr")
     })
@@ -149,7 +149,7 @@ fn assignment_parser(
             .map(|((name, wrapper), expr)| wrapper(name, expr)),
         prop_target.then(assign_wrapper).then(expr_parser()).map(
             |(((p_name, p_args), wrapper), expr)| {
-                let expr = ast::Expr::EPred(p_name.clone(), p_args, Box::new(expr));
+                let expr = ast::Expr::Pred(p_name.clone(), p_args, Box::new(expr));
                 wrapper(p_name, expr)
             },
         ),

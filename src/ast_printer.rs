@@ -7,14 +7,12 @@ pub fn string_of_distribution(d: ast::Distribution) -> String {
             "Uniform({}, {})",
             string_of_const(*low),
             string_of_const(*high)
-        )
-        .to_string(),
+        ),
         Distribution::Normal(mean, std_dev) => format!(
             "Normal({}, {})",
             string_of_const(*mean),
             string_of_const(*std_dev)
-        )
-        .to_string(),
+        ),
         Distribution::List(consts) => format!(
             "List({}, ...)",
             consts
@@ -24,7 +22,6 @@ pub fn string_of_distribution(d: ast::Distribution) -> String {
                 .collect::<Vec<String>>()
                 .join(", ")
         )
-        .to_string(),
     }
 }
 
@@ -63,14 +60,14 @@ fn string_of_unop(u: ast::Unop) -> String {
 pub fn string_of_expr(e: ast::Expr) -> String {
     use ast::Expr;
     match e {
-        Expr::EBinop(b, e1, e2) => {
+        Expr::Binop(b, e1, e2) => {
             string_of_expr(*e1) + " " + &string_of_binop(b) + " " + &string_of_expr(*e2)
         }
-        Expr::EConst(c) => string_of_const(c),
-        Expr::EUnop(u, e) => string_of_unop(u) + &string_of_expr(*e),
-        Expr::EVar(s) => s,
-        Expr::EInput => "input".to_owned(),
-        Expr::ECall(name, args) => format!(
+        Expr::Const(c) => string_of_const(c),
+        Expr::Unop(u, e) => string_of_unop(u) + &string_of_expr(*e),
+        Expr::Var(s) => s,
+        Expr::Input => "input".to_owned(),
+        Expr::Call(name, args) => format!(
             "{}({})",
             name,
             args.into_iter()
@@ -78,13 +75,13 @@ pub fn string_of_expr(e: ast::Expr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Expr::EPred(_name, _args, body) => string_of_expr(*body),
+        Expr::Pred(_name, _args, body) => string_of_expr(*body),
     }
 }
 
 fn string_of_target(name: String, e: ast::Expr) -> String {
     match e {
-        ast::Expr::EPred(_name, args, _body) => name + "(" + &args.join(",") + ")",
+        ast::Expr::Pred(_name, args, _body) => name + "(" + &args.join(",") + ")",
         _ => name,
     }
 }

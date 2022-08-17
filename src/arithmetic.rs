@@ -1,5 +1,3 @@
-use std::iter;
-
 use crate::{ast, errors};
 use ast::Const;
 // use rand::prelude::{IteratorRandom, SliceRandom};
@@ -74,7 +72,6 @@ pub fn add(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -155,7 +152,6 @@ pub fn sub(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -209,7 +205,6 @@ pub fn mul(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -264,7 +259,6 @@ pub fn div(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -273,8 +267,8 @@ fn pow(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
     match (a.clone(), b.clone()) {
         (Const::Number(n1), Const::Number(n2)) => Ok(Const::Number(i64::pow(
             n1,
-            n2.try_into().expect(
-                format!("The power {n2} was too fat. It unfortunately didn't fit `u32`.").as_str(),
+            n2.try_into().unwrap_or_else(|_|
+                panic!("The power {n2} was too fat. It unfortunately didn't fit `u32`."),
             ),
         ))),
         (Const::Number(n), Const::Float(f)) => Ok(pow(Const::Float(n as f64), Const::Float(f))?),
@@ -315,7 +309,6 @@ fn pow(a: Const, b: Const) -> Result<Const, errors::SimpleConflictError> {
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -326,27 +319,15 @@ pub fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
         ast::Distribution::Uniform(low, high) => {
             // todo: optimize by only constructing `rand::distributions::Uniform` once if given `Number | Float`?
             let lows = match *low {
-                ast::Const::Number(n) => iter::repeat([n as f64].to_vec().into_iter())
-                    .take(count)
-                    .flatten(),
-                ast::Const::Float(f) => {
-                    iter::repeat([f].to_vec().into_iter()).take(count).flatten()
-                }
-                ast::Const::Pdf(low_d) => iter::repeat(spam_sample(low_d, count).into_iter())
-                    .take(1)
-                    .flatten(),
+                ast::Const::Number(n) => vec![n as f64; count],
+                ast::Const::Float(f) => vec![f; count],
+                ast::Const::Pdf(low_d) => spam_sample(low_d, count),
                 _ => panic!("Uniform's low was of unexpected type."),
             };
             let highs = match *high {
-                ast::Const::Number(n) => iter::repeat([n as f64].to_vec().into_iter())
-                    .take(count)
-                    .flatten(),
-                ast::Const::Float(f) => {
-                    iter::repeat([f].to_vec().into_iter()).take(count).flatten()
-                }
-                ast::Const::Pdf(low_d) => iter::repeat(spam_sample(low_d, count).into_iter())
-                    .take(1)
-                    .flatten(),
+                ast::Const::Number(n) => vec![n as f64; count],
+                ast::Const::Float(f) => vec![f; count],
+                ast::Const::Pdf(high_d) => spam_sample(high_d, count),
                 _ => panic!("Uniform's high was of unexpected type."),
             };
 
@@ -361,29 +342,15 @@ pub fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
         }
         ast::Distribution::Normal(mean, std_dev) => {
             let means = match *mean {
-                ast::Const::Number(n) => iter::repeat([n as f64].to_vec().into_iter())
-                    .take(count)
-                    .flatten(),
-                ast::Const::Float(f) => {
-                    iter::repeat([f].to_vec().into_iter()).take(count).flatten()
-                }
-                ast::Const::Pdf(mean_d) => iter::repeat(spam_sample(mean_d, count).into_iter())
-                    .take(1)
-                    .flatten(),
+                ast::Const::Number(n) => vec![n as f64; count],
+                ast::Const::Float(f) => vec![f; count],
+                ast::Const::Pdf(mean_d) => spam_sample(mean_d, count),
                 _ => panic!("Normal's mean was of unexpected type."),
             };
             let std_devs = match *std_dev {
-                ast::Const::Number(n) => iter::repeat([n as f64].to_vec().into_iter())
-                    .take(count)
-                    .flatten(),
-                ast::Const::Float(f) => {
-                    iter::repeat([f].to_vec().into_iter()).take(count).flatten()
-                }
-                ast::Const::Pdf(std_dev_d) => {
-                    iter::repeat(spam_sample(std_dev_d, count).into_iter())
-                        .take(1)
-                        .flatten()
-                }
+                ast::Const::Number(n) => vec![n as f64; count],
+                ast::Const::Float(f) => vec![f; count],
+                ast::Const::Pdf(std_dev_d) => spam_sample(std_dev_d, count),
                 _ => panic!("Normal's std_dev was of unexpected type."),
             };
 
@@ -393,7 +360,7 @@ pub fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
                 .map(|(mean, std_dev)| {
                     // todo: better error handling for `rand_distr::Normal::new(_, _)`.
                     let dist: rand_distr::Normal<f64> = rand_distr::Normal::new(mean, std_dev)
-                        .expect(format!("std_dev {std_dev} ain't finite.").as_str());
+                        .unwrap_or_else(|_| panic!("std_dev {std_dev} ain't finite."));
                     dist.sample(&mut rng)
                 })
                 .collect::<Vec<f64>>()
@@ -415,7 +382,6 @@ pub fn spam_sample(d: ast::Distribution, count: usize) -> Vec<f64> {
             // sample.append(&mut remaining_bit.to_vec());
 
             // sample
-
             v
         }
     }

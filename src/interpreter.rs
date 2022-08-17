@@ -159,7 +159,7 @@ impl VarContext {
         if let Some(dependents) = self.until_dependencies_tracker.clone().get(var_name) {
             for (dep_name, _) in dependents.iter() {
                 let vars = &self.vars.clone();
-                let (temp_texpr_pairs, _) = Self::get_from_hashmap(vars, dep_name).expect("Name({dep_name}) isn't in `until_dependencies_tracker.get(Name({var_name}))`, but Name({dep_name}) is supposedly dependent on Name({var_name}).`.");
+                let (temp_texpr_pairs, _) = Self::get_from_hashmap(vars, dep_name).unwrap_or_else(|| panic!("Name({dep_name}) isn't in `until_dependencies_tracker.get(Name({var_name}))`, but Name({dep_name}) is supposedly dependent on Name({var_name}).`."));
                 for (temp, texpr) in temp_texpr_pairs.iter() {
                     if let Some(until_conds) = temp.is_until.clone() {
                         let udep_map = &self.udep_map;
@@ -170,7 +170,7 @@ impl VarContext {
                             .chain(until_conds.weak.iter())
                             .map(|until_cond| {
                                 let cond_texpr =
-                                    Self::get_from_hashmap(udep_map, until_cond).expect("`udep_map` is missing `until_cond` {until_cond}. The only time `udep_map` is mutated (and shrunk) during run-time is `destruct_value`.");
+                                    Self::get_from_hashmap(udep_map, until_cond).unwrap_or_else(|| panic!("`udep_map` is missing `until_cond` {until_cond}. The only time `udep_map` is mutated (and shrunk) during run-time is `destruct_value`."));
                                 eval_expr(cond_texpr.to_owned(), &mut context_clone, false)
                             })
                             .collect();
@@ -223,7 +223,7 @@ impl VarContext {
 
     fn add_assertion(&mut self, assertion: TypedCommand) {
         match assertion {
-            TypedCommand::TGlobal(name, texpr) | TypedCommand::TNext(name, texpr) | TypedCommand::TUpdate(name, texpr) | TypedCommand::TFinally(name, texpr) => {
+            TypedCommand::Global(name, texpr) | TypedCommand::Next(name, texpr) | TypedCommand::Update(name, texpr) | TypedCommand::Finally(name, texpr) => {
                 if let Some(asserts_de_name) = Self::get_from_hashmap(&self.assertions, &name) {
                     let ty:Type = ast::type_of_typedexpr(texpr.clone());
                     // not going to check for temporal conflicts since they can just be caught at assertion-time.
@@ -234,7 +234,7 @@ impl VarContext {
                     self.assertions.insert(name, [(ast::type_of_typedexpr(texpr.clone()).get_temporal(), ast::strip_untils_off_texpr(texpr), false)].to_vec());
                 }
             },
-            TypedCommand::TPrint(_) | TypedCommand::TDist(_) | TypedCommand::TAssert(_) => panic!("This should've been caught during parsing. Assertions shouldn't assert prints/assertions/dist. `assert(assert(3))` `assert(print(3))` `assert(dist(uniform))`???")
+            TypedCommand::Print(_) | TypedCommand::Dist(_) | TypedCommand::Assert(_) => panic!("This should've been caught during parsing. Assertions shouldn't assert prints/assertions/dist. `assert(assert(3))` `assert(print(3))` `assert(dist(uniform))`???")
 
         };
     }
@@ -369,7 +369,7 @@ impl VarContext {
             };
 
             match eval_expr(
-                TypedExpr::TEVar(
+                TypedExpr::Var(
                     name.clone(),
                     Type(temporal_undefined, SimpleType::Undefined),
                 ),
@@ -402,7 +402,7 @@ impl VarContext {
                             && !assertion_results.iter().all(|(_, x, _)| x.to_owned())
                         {
                             Err(errors::AssertionError {
-                                message: format!("an assertion of {} failed.", name).to_string(),
+                                message: format!("an assertion of {} failed.", name),
                             })?
                         }
 
@@ -595,7 +595,7 @@ impl VarContext {
 
 fn boolify(texpr: TypedExpr) -> bool {
     match texpr {
-        TypedExpr::TEConst(c, _) => match c {
+        TypedExpr::Const(c, _) => match c {
             ast::Const::Bool(b) => b,
             ast::Const::Number(_) => panic!("Truthy-falsey not implemented yet for integers."),
             ast::Const::Float(_) => panic!("Truthy-falsey not implemented yet for floats."),
@@ -663,19 +663,19 @@ fn sort_texprs_by_immediacy(
 
 fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
     match e {
-        TypedExpr::TEConst(_, _) => ast::FreeVars::new(),
-        TypedExpr::TEVar(v, _) => {
+        TypedExpr::Const(_, _) => ast::FreeVars::new(),
+        TypedExpr::Var(v, _) => {
             let mut free_vars = ast::FreeVars::new();
             free_vars.insert(v);
             free_vars
         }
-        TypedExpr::TEBinop(_, e1, e2, _) => free_vars_of_texpr(*e1)
+        TypedExpr::Binop(_, e1, e2, _) => free_vars_of_texpr(*e1)
             .union(&free_vars_of_texpr(*e2))
             .cloned()
             .collect(),
-        TypedExpr::TEUnop(_, e1, _) => free_vars_of_texpr(*e1),
-        TypedExpr::TEInput(_) => ast::FreeVars::new(),
-        TypedExpr::TECall(name, args, _) => {
+        TypedExpr::Unop(_, e1, _) => free_vars_of_texpr(*e1),
+        TypedExpr::Input(_) => ast::FreeVars::new(),
+        TypedExpr::Call(name, args, _) => {
             let name = HashSet::from([name]);
             
             args.into_iter().fold(name, |vars, x| {
@@ -684,7 +684,7 @@ fn free_vars_of_texpr(e: TypedExpr) -> ast::FreeVars {
                     .collect::<HashSet<Var>>()
             })
         }
-        TypedExpr::TEPred(name, args, body, _) => {
+        TypedExpr::Pred(name, args, body, _) => {
             let body_free_vars = free_vars_of_texpr(*body);
             let defined_vars = ast::FreeVars::from_iter(args.into_iter().chain(iter::once(name)));
             body_free_vars
@@ -701,8 +701,8 @@ fn eval_expr(
     is_pred: bool,
 ) -> Result<Option<TypedExpr>, errors::ExecutionTimeError> {
     match e {
-        TypedExpr::TEConst(_, _) => Ok(Some(e)),
-        TypedExpr::TEVar(var_name, t) => {
+        TypedExpr::Const(_, _) => Ok(Some(e)),
+        TypedExpr::Var(var_name, t) => {
             // any `FOL` violations should've been caught at CompileTime.
 
             let values: Vec<Value> = ctx.look_up(&var_name)?;
@@ -717,7 +717,7 @@ fn eval_expr(
                 Err(errors::CurrentlyUnavailableError{message : format!("You tried access a value that's only available in the next timestep... Temporal Type was {:?}", ty)})?
             }
         }
-        TypedExpr::TEBinop(b, e1, e2, t) => {
+        TypedExpr::Binop(b, e1, e2, t) => {
             use ast::Binop;
             use ast::Const;
 
@@ -725,7 +725,7 @@ fn eval_expr(
             // Sure, propositions are expressions, but stuff like returning a proposition?
             // `f(x) = x > .3 & g` is illegal if `g : proposition`
             let c1: Option<Const> = match eval_expr(*e1, ctx, is_pred)? {
-                Some(TypedExpr::TEConst(c1, _)) => Some(c1),
+                Some(TypedExpr::Const(c1, _)) => Some(c1),
                 Some(a) => panic!(
                     "{}",
                     format!(
@@ -739,7 +739,7 @@ fn eval_expr(
             let result: Option<Const> = match b {
                 Binop::Plus => {
                     let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
-                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(TypedExpr::Const(c2, _)) => Some(c2),
                         Some(b) => panic!(
                             "{}",
                             format!(
@@ -756,7 +756,7 @@ fn eval_expr(
                 }
                 Binop::Minus => {
                     let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
-                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(TypedExpr::Const(c2, _)) => Some(c2),
                         Some(b) => panic!(
                             "{}",
                             format!(
@@ -773,7 +773,7 @@ fn eval_expr(
                 }
                 Binop::Times => {
                     let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
-                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(TypedExpr::Const(c2, _)) => Some(c2),
                         Some(b) => panic!(
                             "{}",
                             format!(
@@ -790,7 +790,7 @@ fn eval_expr(
                 }
                 Binop::Div => {
                     let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
-                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(TypedExpr::Const(c2, _)) => Some(c2),
                         Some(b) => panic!(
                             "{}",
                             format!(
@@ -807,7 +807,7 @@ fn eval_expr(
                 }
                 Binop::Until | Binop::SUntil => {
                     let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
-                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(TypedExpr::Const(c2, _)) => Some(c2),
                         Some(b) => panic!(
                             "{}",
                             format!(
@@ -838,7 +838,7 @@ fn eval_expr(
                 }
                 Binop::Or => {
                     let c2: Option<Const> = match eval_expr(*e2, ctx, is_pred)? {
-                        Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                        Some(TypedExpr::Const(c2, _)) => Some(c2),
                         Some(b) => panic!(
                             "{}",
                             format!(
@@ -865,7 +865,7 @@ fn eval_expr(
                     Some(Const::Bool(b1)) => {
                         if b1 {
                             match eval_expr(*e2, ctx, is_pred)? {
-                                    Some(TypedExpr::TEConst(c2, _)) => Some(c2),
+                                    Some(TypedExpr::Const(c2, _)) => Some(c2),
                                     Some(b) => panic!(
                                         "{}",
                                         format!(
@@ -885,7 +885,7 @@ fn eval_expr(
             };
 
             Ok(if let Some(result) = result {
-                let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
+                let constant = TypedExpr::Const(result.clone(), ast::type_of_constant(result));
                 Some(ast::new_texpr(
                     constant,
                     t,
@@ -895,12 +895,12 @@ fn eval_expr(
                 None
             })
         }
-        TypedExpr::TEUnop(u, e1, t) => {
+        TypedExpr::Unop(u, e1, t) => {
             use ast::Const;
             use ast::Unop;
 
             let c: Option<Const> = match eval_expr(*e1, ctx, is_pred)? {
-                Some(TypedExpr::TEConst(c, _)) => Some(c),
+                Some(TypedExpr::Const(c, _)) => Some(c),
                 Some(_) => panic!("Did not receive a constant after evaluation."),
                 None => None,
             };
@@ -923,7 +923,7 @@ fn eval_expr(
             };
 
             Ok(if let Some(result) = result {
-                let constant = TypedExpr::TEConst(result.clone(), ast::type_of_constant(result));
+                let constant = TypedExpr::Const(result.clone(), ast::type_of_constant(result));
                 Some(ast::new_texpr(
                     constant,
                     t,
@@ -933,20 +933,20 @@ fn eval_expr(
                 None
             })
         }
-        TypedExpr::TEInput(t) => {
+        TypedExpr::Input(t) => {
             let mut buffer = String::new();
             std::io::stdin()
                 .read_line(&mut buffer)
                 .expect("Failed to read line.");
             if let Ok(n) = buffer.trim().parse() {
-                Ok(Some(TypedExpr::TEConst(ast::Const::Number(n), t)))
+                Ok(Some(TypedExpr::Const(ast::Const::Number(n), t)))
             } else {
                 Err(errors::InputError {
                     message: "Input is not an integer!".to_string(),
                 })?
             }
         }
-        TypedExpr::TECall(name, args, return_type) => {
+        TypedExpr::Call(name, args, return_type) => {
             // this ain't lazy
             let args: Option<Vec<TypedExpr>> = args
                 .into_iter()
@@ -975,7 +975,7 @@ fn eval_expr(
                         match ast::type_of_typedexpr(arg.clone()).get_simpl() {
                             SimpleType::Pdf => {
                                 match arg {
-                                    TypedExpr::TEConst(ast::Const::Pdf(d), _) => arithmetic::spam_sample(d, arithmetic::SAMPLE_N).into_iter().map(|f| TypedExpr::TEConst(ast::Const::Float(f), types::Type(curr_existing_val_temp.clone(), types::SimpleType::Float))).collect::<Vec<TypedExpr>>(),
+                                    TypedExpr::Const(ast::Const::Pdf(d), _) => arithmetic::spam_sample(d, arithmetic::SAMPLE_N).into_iter().map(|f| TypedExpr::Const(ast::Const::Float(f), types::Type(curr_existing_val_temp.clone(), types::SimpleType::Float))).collect::<Vec<TypedExpr>>(),
                                     _ => panic!("How did a value that's not a ast::teconst(ast::const::pdf) have type simpletype::pdf?")
                                 }
                             },
@@ -999,7 +999,7 @@ fn eval_expr(
                         .into_iter()
                         .map(|arg_set| {
                             eval_expr(
-                                TypedExpr::TECall(
+                                TypedExpr::Call(
                                     name.clone(),
                                     arg_set,
                                     types::Type(
@@ -1021,7 +1021,7 @@ fn eval_expr(
                     let consts: Vec<ast::Const> = results
                         .into_iter()
                         .map(|opt_texpr| match opt_texpr {
-                            Some(TypedExpr::TEConst(c, _)) => c,
+                            Some(TypedExpr::Const(c, _)) => c,
                             _ => panic!("should've received constants after evaluation"),
                         })
                         .collect();
@@ -1042,7 +1042,7 @@ fn eval_expr(
                         })
                         .collect();
 
-                    Ok(TypedExpr::TEConst(
+                    Ok(TypedExpr::Const(
                         ast::Const::Pdf(ast::Distribution::List(list)),
                         types::Type(curr_existing_val_temp, types::SimpleType::Pdf),
                     ))
@@ -1050,7 +1050,7 @@ fn eval_expr(
                     // don't need to constrain/check `return_type` since it's built-in.
                     Ok(builtins::exec_builtin(name, args)?)
                 } else {
-                    // Doesn't use `TEVar` to hold `name` since we are using a vec of predicates. `TEVar` only uses *one* value.
+                    // Doesn't use `TE::Var` to hold `name` since we are using a vec of predicates. `TE::Var` only uses *one* value.
                     let preds = ctx.look_up(&name)?;
 
                     let currents: Vec<Value> = preds
@@ -1100,14 +1100,14 @@ fn eval_expr(
                 Ok(None)
             }
         }
-        TypedExpr::TEPred(name, params, body, t) => {
+        TypedExpr::Pred(name, params, body, t) => {
             if builtins::is_builtin(&name) {
                 Err(errors::PredicateExprError {
                     message: "Predicates that share a name with a builtin cannot be created."
                         .to_string(),
                 })?
             }
-            Ok(Some(TypedExpr::TEPred(name, params, body, t)))
+            Ok(Some(TypedExpr::Pred(name, params, body, t)))
         }
     }
 }
@@ -1128,7 +1128,7 @@ fn run_predicate_definitions(
     for (Type(_, simpl), pred) in definitions.into_iter() {
         if let SimpleType::Predicate(arg_ts, ret) = simpl {
             let mut local_context = ctx.clone();
-            if let TypedExpr::TEPred(_, params, body, _) = pred {
+            if let TypedExpr::Pred(_, params, body, _) = pred {
                 for ((param, arg), arg_t) in params
                     .iter()
                     .zip(args.clone().into_iter())
@@ -1174,30 +1174,30 @@ fn exec_command(
     ctx: &mut VarContext,
 ) -> Result<Option<(String, ast::Const)>, errors::ExecutionTimeError> {
     match c {
-        TypedCommand::TGlobal(v, texpr) => {
+        TypedCommand::Global(v, texpr) => {
             // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`")
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(None)
         }
-        TypedCommand::TNext(v, texpr) => {
+        TypedCommand::Next(v, texpr) => {
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(None)
         }
-        TypedCommand::TUpdate(v, texpr) => {
+        TypedCommand::Update(v, texpr) => {
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(None)
         }
-        TypedCommand::TFinally(v, texpr) => {
+        TypedCommand::Finally(v, texpr) => {
             let val = eval_expr(texpr.clone(), ctx, false)?.unwrap();
             ctx.add_var(&v, &val, &ast::type_of_typedexpr(texpr))?;
             Ok(None)
         }
-        TypedCommand::TPrint(texpr) => {
+        TypedCommand::Print(texpr) => {
             let c = match eval_expr(texpr.clone(), ctx, false)?.unwrap() {
-                TypedExpr::TEConst(c, _) => c,
+                TypedExpr::Const(c, _) => c,
                 _ => panic!("Evaluation did not result in a constant."),
             };
             match c {
@@ -1224,13 +1224,13 @@ fn exec_command(
             };
             Ok(None)
         }
-        TypedCommand::TAssert(assertion) => {
+        TypedCommand::Assert(assertion) => {
             ctx.add_assertion(*assertion);
             Ok(None)
         }
-        TypedCommand::TDist(texpr) => {
+        TypedCommand::Dist(texpr) => {
             let c: ast::Const = match eval_expr(texpr.clone(), ctx, false)?.unwrap() {
-                TypedExpr::TEConst(c, _) => c,
+                TypedExpr::Const(c, _) => c,
                 _ => panic!("Evaluation did not result in a constant."),
             };
             Ok(Some((

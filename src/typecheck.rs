@@ -77,7 +77,7 @@ impl TypeContext {
             }
         } else {
             Err(errors::NameError {
-                message: format!("Name {} was never assigned to.", var_name).to_string(),
+                message: format!("Name {} was never assigned to.", var_name),
             })?
         }
     }
@@ -215,11 +215,8 @@ fn infer_expr(
     until_dependencies: &mut types::UntilDependencies,
     udep_map: &mut HashMap<usize, ast::TypedExpr>,
 ) -> Result<ast::TypedExpr, errors::CompileTimeError> {
-    use ast::Expr;
-    use ast::TypedExpr;
-    use types::SimpleType;
-    use types::TemporalType;
-    use types::Type;
+    use ast::{Expr, TypedExpr};
+    use types::{SimpleType, TemporalType, Type};
 
     let temporal_undefined = TemporalType {
         when_available: types::TemporalAvailability::Undefined,
@@ -228,7 +225,7 @@ fn infer_expr(
     };
 
     match e {
-        Expr::EBinop(b, e1, e2) => {
+        Expr::Binop(b, e1, e2) => {
             use ast::Binop;
             let operand1 = infer_expr(*e1, ctx, until_dependencies, udep_map)?;
             let operand2 = infer_expr(*e2, ctx, until_dependencies, udep_map)?;
@@ -283,7 +280,7 @@ fn infer_expr(
                     };
 
                     let t = Type(temporal_undefined, simpl);
-                    Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
+                    Ok(TypedExpr::Binop(b, Box::new(op1), Box::new(op2), t))
                 }
                 Binop::Or => {
                     // todo: negation as failure?
@@ -299,7 +296,7 @@ fn infer_expr(
 
                     // let t = Type(temporal_undefined, SimpleType::Bool);
                     let t = type_of_typedexpr(op2.clone());
-                    Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
+                    Ok(TypedExpr::Binop(b, Box::new(op1), Box::new(op2), t))
                 }
                 Binop::And => {
                     // todo: negation as failure?
@@ -312,7 +309,7 @@ fn infer_expr(
                     let op2 = operand2;
                     let Type(temp, simpl) = type_of_typedexpr(op2.clone());
                     let t = Type(temp, simpl);
-                    Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
+                    Ok(TypedExpr::Binop(b, Box::new(op1), Box::new(op2), t))
                 }
                 Binop::Until => {
                     // todo: truthiness
@@ -330,7 +327,7 @@ fn infer_expr(
                     udep_map.insert(id, op2.clone());
 
                     let t = ast::type_of_typedexpr(op1.clone());
-                    Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
+                    Ok(TypedExpr::Binop(b, Box::new(op1), Box::new(op2), t))
                 }
                 Binop::SUntil => {
                     // the same as `Until` because `SUntil(A, B) :- Until(A, B) and Finally(B)` can be done when translating to LTL/BA.
@@ -349,15 +346,15 @@ fn infer_expr(
                     udep_map.insert(id, op2.clone());
 
                     let t = ast::type_of_typedexpr(op1.clone());
-                    Ok(TypedExpr::TEBinop(b, Box::new(op1), Box::new(op2), t))
+                    Ok(TypedExpr::Binop(b, Box::new(op1), Box::new(op2), t))
                 }
             }
         }
-        Expr::EConst(c) => {
+        Expr::Const(c) => {
             let t = ast::type_of_constant(c.clone());
-            Ok(TypedExpr::TEConst(c, t))
+            Ok(TypedExpr::Const(c, t))
         }
-        Expr::EUnop(u, e1) => {
+        Expr::Unop(u, e1) => {
             use ast::Unop;
             let operand1 = infer_expr(*e1, ctx, until_dependencies, udep_map)?;
             match u {
@@ -377,7 +374,7 @@ fn infer_expr(
                     )?;
 
                     let t = Type(temporal_undefined, SimpleType::Int);
-                    Ok(TypedExpr::TEUnop(u, Box::new(op1), t))
+                    Ok(TypedExpr::Unop(u, Box::new(op1), t))
                 }
                 Unop::Not => {
                     // todo: truthiness
@@ -389,14 +386,14 @@ fn infer_expr(
                     )?;
 
                     let t = Type(temporal_undefined, SimpleType::Bool);
-                    Ok(TypedExpr::TEUnop(u, Box::new(op1), t))
+                    Ok(TypedExpr::Unop(u, Box::new(op1), t))
                 }
             }
         }
-        Expr::EVar(s) => {
+        Expr::Var(s) => {
             if builtins::is_builtin(&s) {
                 Err(errors::PredicateExprError {
-                    message: format!("Tried to access builtin predicate {}. FOL!", s).to_string(),
+                    message: format!("Tried to access builtin predicate {}. FOL!", s),
                 })?
             }
 
@@ -404,12 +401,12 @@ fn infer_expr(
 
             if named_type.get_simpl().is_predicate() {
                 Err(errors::PredicateExprError {
-                    message: format!("Tried to access predicate {}. FOL!", s).to_string(),
+                    message: format!("Tried to access predicate {}. FOL!", s),
                 })?
             }
 
             if types::is_currently_available(&named_type.get_temporal()) {
-                Ok(TypedExpr::TEVar(
+                Ok(TypedExpr::Var(
                     s,
                     Type(temporal_undefined, named_type.get_simpl()),
                 ))
@@ -419,11 +416,11 @@ fn infer_expr(
                 })?
             }
         }
-        Expr::EInput => Ok(TypedExpr::TEInput(Type(
+        Expr::Input => Ok(TypedExpr::Input(Type(
             temporal_undefined,
             types::SimpleType::Int,
         ))),
-        Expr::ECall(name, args) => {
+        Expr::Call(name, args) => {
             // temporal type of arguments. these can't be temporally `undefined`, which `infer_expr` would blindly give.
             // we need to simulate `=` assignment in `local_context`.
             let temporal_ty_arg = TemporalType {
@@ -445,7 +442,7 @@ fn infer_expr(
             });
 
             if is_dist_splatted {
-                Ok(TypedExpr::TECall(
+                Ok(TypedExpr::Call(
                     name,
                     typed_args,
                     Type(temporal_undefined, types::SimpleType::Pdf),
@@ -457,7 +454,7 @@ fn infer_expr(
                     .map(|texpr| ast::type_of_typedexpr(texpr).get_simpl())
                     .collect();
                 let ret: SimpleType = builtins::typecheck_builtin(name.clone(), simpls)?;
-                Ok(TypedExpr::TECall(
+                Ok(TypedExpr::Call(
                     name,
                     typed_args,
                     Type(temporal_undefined, ret),
@@ -476,19 +473,19 @@ fn infer_expr(
                             )
                         })
                         .collect();
-                    Ok(TypedExpr::TECall(
+                    Ok(TypedExpr::Call(
                         name,
                         constrained_typed_args?,
                         Type(temporal_undefined, *ret),
                     ))
                 } else {
                     Err(errors::ImproperCallError {
-                        message: format!("Attempted to call a non-predicate {}", name).to_string(),
+                        message: format!("Attempted to call a non-predicate {}", name),
                     })?
                 }
             }
         }
-        Expr::EPred(name, params, body) => {
+        Expr::Pred(name, params, body) => {
             if builtins::is_builtin(&name) {
                 Err(errors::PredicateExprError {
                     message: "Predicates that share a name with a builtin cannot be created."
@@ -559,7 +556,7 @@ fn infer_expr(
             // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
             let simpl_return_type = type_of_typedexpr(typed_body.clone()).get_simpl();
 
-            Ok(TypedExpr::TEPred(
+            Ok(TypedExpr::Pred(
                 name,
                 params,
                 Box::new(typed_body),
@@ -629,7 +626,7 @@ fn infer_command(
             if !is_assert {
                 ctx.add_name(&v, t)?;
             }
-            Ok(TypedCommand::TGlobal(v, te))
+            Ok(TypedCommand::Global(v, te))
         }
         Command::Next(v, e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
@@ -656,7 +653,7 @@ fn infer_command(
             if !is_assert {
                 ctx.add_name(&v, t)?;
             }
-            Ok(TypedCommand::TNext(v, te))
+            Ok(TypedCommand::Next(v, te))
         }
         Command::Update(v, e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
@@ -683,7 +680,7 @@ fn infer_command(
             if !is_assert {
                 ctx.add_name(&v, t)?;
             }
-            Ok(TypedCommand::TUpdate(v, te))
+            Ok(TypedCommand::Update(v, te))
         }
         Command::Finally(v, e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
@@ -710,12 +707,12 @@ fn infer_command(
             if !is_assert {
                 ctx.add_name(&v, t)?;
             }
-            Ok(TypedCommand::TFinally(v, te))
+            Ok(TypedCommand::Finally(v, te))
         }
         Command::Print(e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
             if blank_until_dependencies.is_empty() {
-                Ok(TypedCommand::TPrint(te))
+                Ok(TypedCommand::Print(te))
             } else {
                 Err(errors::TemporalConflictError {
                     message: "Why are you trying to print an until expression? Just simplify it..."
@@ -749,14 +746,14 @@ fn infer_command(
                 local.vars.remove(v);
                 local.add_name(v, Type(temporal_ty_assert.clone(), SimpleType::Undefined))?
             }
-            Ok(TypedCommand::TAssert(Box::new(infer_command(
+            Ok(TypedCommand::Assert(Box::new(infer_command(
                 assertion, &mut local, udep_map, true,
             )?)))
         }
         Command::Dist(e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
             if blank_until_dependencies.is_empty() {
-                Ok(TypedCommand::TDist(te))
+                Ok(TypedCommand::Dist(te))
             } else {
                 Err(errors::TemporalConflictError {
                     message: "Why are you trying to dist an until expression? Just simplify it..."
@@ -869,19 +866,19 @@ fn infer_timeblock(
 fn free_vars_of_expr(e: ast::Expr) -> ast::FreeVars {
     use ast::Expr;
     match e {
-        Expr::EConst(_) => ast::FreeVars::new(),
-        Expr::EVar(v) => {
+        Expr::Const(_) => ast::FreeVars::new(),
+        Expr::Var(v) => {
             let mut free_vars = ast::FreeVars::new();
             free_vars.insert(v);
             free_vars
         }
-        Expr::EBinop(_, e1, e2) => free_vars_of_expr(*e1)
+        Expr::Binop(_, e1, e2) => free_vars_of_expr(*e1)
             .union(&free_vars_of_expr(*e2))
             .cloned()
             .collect(),
-        Expr::EUnop(_, e1) => free_vars_of_expr(*e1),
-        Expr::EInput => ast::FreeVars::new(),
-        Expr::ECall(name, args) => {
+        Expr::Unop(_, e1) => free_vars_of_expr(*e1),
+        Expr::Input => ast::FreeVars::new(),
+        Expr::Call(name, args) => {
             let name = HashSet::from([name]);
             let free_vars = args.into_iter().fold(name, |vars, x| {
                 vars.union(&free_vars_of_expr(x))
@@ -890,7 +887,7 @@ fn free_vars_of_expr(e: ast::Expr) -> ast::FreeVars {
             });
             free_vars
         }
-        Expr::EPred(name, args, body) => {
+        Expr::Pred(name, args, body) => {
             let body_free_vars = free_vars_of_expr(*body);
             let defined_vars = ast::FreeVars::from_iter(args.into_iter().chain(iter::once(name)));
             body_free_vars
@@ -935,13 +932,7 @@ fn arrange_by_dependencies(
     let a = block
         .iter()
         .map(|cmd| (defined_var_of_command(cmd), cmd.clone()));
-    let defined_vars: ast::DefVars = HashSet::from_iter(a.clone().filter_map(|(opt, _)| {
-        if let Some(name) = opt {
-            Some(name)
-        } else {
-            None
-        }
-    }));
+    let defined_vars: ast::DefVars = HashSet::from_iter(a.clone().filter_map(|(opt, _)| opt));
     let delayed_commands: Vec<ast::Command> = a
         .filter_map(
             |(opt, cmd)| {
@@ -965,7 +956,7 @@ fn arrange_by_dependencies(
                         defined_var_of_command(cmd),
                         free_vars_of_command(cmd)
                             .intersection(&defined_vars)
-                            .map(|var| var.clone())
+                            .cloned()
                             .collect(),
                     )
                 },
@@ -996,9 +987,9 @@ fn arrange_by_dependencies(
             graph.add_edge(
                 *var_map
                     .get(dest)
-                    .expect(format!("dest {:?} should've been added to var_map", dest).as_str()),
-                *var_map.get(origin).expect(
-                    format!("origin {:?} should've been added to var_map", origin).as_str(),
+                    .unwrap_or_else(|| panic!("dest {:?} should've been added to var_map", dest)),
+                *var_map.get(origin).unwrap_or_else(||
+                    panic!("origin {:?} should've been added to var_map", origin),
                 ),
                 1,
             );
@@ -1028,8 +1019,8 @@ fn arrange_by_dependencies(
                 cmd_order.append(
                     &mut cmd_by_var
                         .get(var)
-                        .expect(
-                            format!("variable_name {var} should've been in `cmd_by_var`").as_str(),
+                        .unwrap_or_else(||
+                            panic!("variable_name {var} should've been in `cmd_by_var`"),
                         )
                         .clone(),
                 );

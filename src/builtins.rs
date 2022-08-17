@@ -7,11 +7,11 @@ use std::collections::HashSet;
 
 use crate::{arithmetic, ast, errors, types};
 
-pub fn is_builtin(name: &String) -> bool {
+pub fn is_builtin(name: &str) -> bool {
     let builtins = HashSet::from([
         "eq", "neq", "lt", "lte", "gt", "gte", "uniform", "normal", "sample",
     ]);
-    builtins.contains(name.as_str())
+    builtins.contains(name)
 }
 
 // pub fn ret_of_builtin(name: String) -> Option<types::SimpleType> {
@@ -42,7 +42,6 @@ pub fn typecheck_builtin(
                         name,
                         args.len()
                     )
-                    .to_string(),
                 })?
             }
             match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
@@ -51,7 +50,7 @@ pub fn typecheck_builtin(
                 (a, b) if a == b => Ok(SimpleType::Bool),
                 (SimpleType::Int, SimpleType::Float) => Ok(SimpleType::Bool),
                 (SimpleType::Float, SimpleType::Int) => Ok(SimpleType::Bool),
-                _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `'a -> 'a -> bool` but {:?} were provided.", name, args).to_string()})?,
+                _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `'a -> 'a -> bool` but {:?} were provided.", name, args)})?,
             }
         }
         "lt" | "lte" | "gt" | "gte" => {
@@ -62,14 +61,13 @@ pub fn typecheck_builtin(
                         name,
                         args.len()
                     )
-                    .to_string(),
                 })?
             }
             match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
                 (SimpleType::Undefined, _) => Ok(SimpleType::Bool),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Bool),
                 (SimpleType::Int | SimpleType::Float, SimpleType::Int | SimpleType::Float) => Ok(SimpleType::Bool),
-                _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `int -> int -> bool` but {:?} were provided.", name, args).to_string()})?,
+                _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `int -> int -> bool` but {:?} were provided.", name, args)})?,
             }
         }
         "uniform" | "normal" => {
@@ -80,14 +78,13 @@ pub fn typecheck_builtin(
                         name,
                         args.len()
                     )
-                    .to_string(),
                 })?
             }
             match (args.get(0).expect("The if-length=2 check directly above failed...").to_owned(), args.get(1).expect("The if-length=2 check directly above failed...").to_owned()) {
                 (SimpleType::Undefined, _) => Ok(SimpleType::Pdf),
                 (_, SimpleType::Undefined) => Ok(SimpleType::Pdf),
                 (SimpleType::Int | SimpleType::Float | SimpleType::Pdf, SimpleType::Int | SimpleType::Float | SimpleType::Pdf) => Ok(SimpleType::Pdf),
-                _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `int -> int -> bool` but {:?} were provided.", name, args).to_string()})?,
+                _ => Err(errors::ImproperCallError {message:format!("Built-in Predicate {} is of type `int -> int -> bool` but {:?} were provided.", name, args)})?,
             }
         }
         "sample" => {
@@ -98,7 +95,6 @@ pub fn typecheck_builtin(
                         name,
                         args.len()
                     )
-                    .to_string(),
                 })?
             }
             match args
@@ -113,7 +109,6 @@ pub fn typecheck_builtin(
                         "Built-in Predicate {} is of type `pdf -> float` but {:?} were provided.",
                         name, args
                     )
-                    .to_string(),
                 })?,
             }
         }
@@ -128,8 +123,8 @@ pub fn exec_builtin(
     let args: Vec<ast::Const> = args
         .into_iter()
         .map(|arg| match arg {
-            ast::TypedExpr::TEConst(c, _) => c,
-            _ => panic!("CMP should only be given `ast::TypedExpr::TEConst`s"),
+            ast::TypedExpr::Const(c, _) => c,
+            _ => panic!("CMP should only be given `ast::TypedExpr::Const`s"),
         })
         .collect();
 
@@ -167,7 +162,7 @@ pub fn exec_builtin(
     };
 
     let returned_const = cmp(args)?;
-    Ok(ast::TypedExpr::TEConst(
+    Ok(ast::TypedExpr::Const(
         returned_const.clone(),
         ast::type_of_constant(returned_const),
     ))
@@ -195,7 +190,6 @@ pub fn builtin_eq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -221,7 +215,6 @@ fn builtin_neq(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -246,7 +239,6 @@ fn builtin_lt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflic
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -271,7 +263,6 @@ fn builtin_lte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -296,7 +287,6 @@ fn builtin_gt(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConflic
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -321,7 +311,6 @@ fn builtin_gte(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleConfli
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -349,7 +338,6 @@ fn builtin_uniform(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCo
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -377,7 +365,6 @@ fn builtin_normal(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
                 ast::string_of_const_type(&a),
                 ast::string_of_const_type(&b)
             )
-            .to_string(),
         }),
     }
 }
@@ -390,7 +377,7 @@ fn builtin_sample(args: Vec<ast::Const>) -> Result<ast::Const, errors::SimpleCon
     match a {
         ast::Const::Pdf(d) => Ok(ast::Const::Float(arithmetic::spam_sample(d, 1)[0])),
         _ => Err(errors::SimpleConflictError {
-            message: format!("{} cannot be sampled", ast::string_of_const_type(&a),).to_string(),
+            message: format!("{} cannot be sampled", ast::string_of_const_type(&a),)
         }),
     }
 }

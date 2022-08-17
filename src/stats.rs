@@ -1,3 +1,4 @@
+use clap;
 // https://jduncstats.com/posts/2019-03-16-kde-scratch/
 
 /*
@@ -67,6 +68,7 @@ pub fn range(start: f64, end: f64, length: i32) -> Vec<f64> {
     std::iter::successors(Some(start), |n| iter.next().map(|_| n + step)).collect::<Vec<f64>>()
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub enum Kernel {
     Gaussian,
     Boxcar,

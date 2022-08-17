@@ -39,13 +39,13 @@ pub enum Unop {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
-    EConst(Const),
-    EVar(Var),
-    EBinop(Binop, Box<Expr>, Box<Expr>),
-    EUnop(Unop, Box<Expr>),
-    EInput,
-    ECall(Var, Vec<Expr>),
-    EPred(Var, Vec<Var>, Box<Expr>),
+    Const(Const),
+    Var(Var),
+    Binop(Binop, Box<Expr>, Box<Expr>),
+    Unop(Unop, Box<Expr>),
+    Input,
+    Call(Var, Vec<Expr>),
+    Pred(Var, Vec<Var>, Box<Expr>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,25 +64,25 @@ pub type Program = Vec<Command>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypedExpr {
-    TEConst(Const, types::Type),
-    TEVar(Var, types::Type),
-    TEBinop(Binop, Box<TypedExpr>, Box<TypedExpr>, types::Type),
-    TEUnop(Unop, Box<TypedExpr>, types::Type),
-    TEInput(types::Type),
-    TECall(Var, Vec<TypedExpr>, types::Type),
+    Const(Const, types::Type),
+    Var(Var, types::Type),
+    Binop(Binop, Box<TypedExpr>, Box<TypedExpr>, types::Type),
+    Unop(Unop, Box<TypedExpr>, types::Type),
+    Input(types::Type),
+    Call(Var, Vec<TypedExpr>, types::Type),
     // Infer type of parameters?
-    TEPred(Var, Vec<Var>, Box<TypedExpr>, types::Type),
+    Pred(Var, Vec<Var>, Box<TypedExpr>, types::Type),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypedCommand {
-    TGlobal(Var, TypedExpr),
-    TNext(Var, TypedExpr),
-    TUpdate(Var, TypedExpr),
-    TFinally(Var, TypedExpr),
-    TPrint(TypedExpr),
-    TAssert(Box<TypedCommand>),
-    TDist(TypedExpr),
+    Global(Var, TypedExpr),
+    Next(Var, TypedExpr),
+    Update(Var, TypedExpr),
+    Finally(Var, TypedExpr),
+    Print(TypedExpr),
+    Assert(Box<TypedCommand>),
+    Dist(TypedExpr),
 }
 
 // `y` is the free var in `f(x) = x * y`
@@ -100,19 +100,19 @@ pub struct TypedProgram {
 
 pub fn type_of_typedexpr(e: TypedExpr) -> types::Type {
     match e {
-        TypedExpr::TEConst(_, t) => t,
-        TypedExpr::TEVar(_, t) => t,
-        TypedExpr::TEBinop(_, _, _, t) => t,
-        TypedExpr::TEUnop(_, _, t) => t,
-        TypedExpr::TEInput(t) => t,
-        TypedExpr::TECall(_, _, t) => t,
-        TypedExpr::TEPred(_, _, _, t) => t,
+        TypedExpr::Const(_, t) => t,
+        TypedExpr::Var(_, t) => t,
+        TypedExpr::Binop(_, _, _, t) => t,
+        TypedExpr::Unop(_, _, t) => t,
+        TypedExpr::Input(t) => t,
+        TypedExpr::Call(_, _, t) => t,
+        TypedExpr::Pred(_, _, _, t) => t,
     }
 }
 
 pub fn const_of_texpr(te: TypedExpr) -> Const {
     match te {
-        TypedExpr::TEConst(c, _) => c,
+        TypedExpr::Const(c, _) => c,
         _ => panic!("That ain't a constant."),
     }
 }
@@ -139,55 +139,55 @@ pub fn new_texpr(
 ) -> Result<TypedExpr, errors::ConstrainError> {
     use types::constrain;
 
-    match e.clone() {
-        TypedExpr::TEConst(c, old_type) => {
+    match e {
+        TypedExpr::Const(c, old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEConst(c, t))
+            Ok(TypedExpr::Const(c, t))
         }
-        TypedExpr::TEVar(v, old_type) => {
+        TypedExpr::Var(v, old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEVar(v, t))
+            Ok(TypedExpr::Var(v, t))
         }
-        TypedExpr::TEBinop(b, e1, e2, old_type) => {
+        TypedExpr::Binop(b, e1, e2, old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEBinop(b, Box::new(*e1), Box::new(*e2), t))
+            Ok(TypedExpr::Binop(b, e1, e2, t))
         }
-        TypedExpr::TEUnop(u, e1, old_type) => {
+        TypedExpr::Unop(u, e1, old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEUnop(u, Box::new(*e1), t))
+            Ok(TypedExpr::Unop(u, e1, t))
         }
-        TypedExpr::TEInput(old_type) => {
+        TypedExpr::Input(old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEInput(t))
+            Ok(TypedExpr::Input(t))
         }
-        TypedExpr::TECall(name, args, old_type) => {
+        TypedExpr::Call(name, args, old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TECall(name, args, t))
+            Ok(TypedExpr::Call(name, args, t))
         }
-        TypedExpr::TEPred(name, args, body, old_type) => {
+        TypedExpr::Pred(name, args, body, old_type) => {
             let t = constrain(&old_type, &constraint, msg)?;
-            Ok(TypedExpr::TEPred(name, args, body, t))
+            Ok(TypedExpr::Pred(name, args, body, t))
         }
     }
 }
 
 pub fn expr_of_texpr(te: TypedExpr) -> Expr {
     match te {
-        TypedExpr::TEConst(c, _) => Expr::EConst(c),
-        TypedExpr::TEVar(v, _) => Expr::EVar(v),
-        TypedExpr::TEBinop(b, e1, e2, _) => Expr::EBinop(
+        TypedExpr::Const(c, _) => Expr::Const(c),
+        TypedExpr::Var(v, _) => Expr::Var(v),
+        TypedExpr::Binop(b, e1, e2, _) => Expr::Binop(
             b,
             Box::new(expr_of_texpr(*e1)),
             Box::new(expr_of_texpr(*e2)),
         ),
-        TypedExpr::TEUnop(u, e1, _) => Expr::EUnop(u, Box::new(expr_of_texpr(*e1))),
-        TypedExpr::TEInput(_) => Expr::EInput,
-        TypedExpr::TECall(name, args, _) => Expr::ECall(
+        TypedExpr::Unop(u, e1, _) => Expr::Unop(u, Box::new(expr_of_texpr(*e1))),
+        TypedExpr::Input(_) => Expr::Input,
+        TypedExpr::Call(name, args, _) => Expr::Call(
             name,
             args.into_iter().map(expr_of_texpr).collect::<Vec<Expr>>(),
         ),
-        TypedExpr::TEPred(name, args, body, _) => {
-            Expr::EPred(name, args, Box::new(expr_of_texpr(*body)))
+        TypedExpr::Pred(name, args, body, _) => {
+            Expr::Pred(name, args, Box::new(expr_of_texpr(*body)))
         }
     }
 }
@@ -196,23 +196,23 @@ pub fn expr_of_texpr(te: TypedExpr) -> Expr {
 // which can lead to `Error: UntilCond is True at the time of evaluation`
 pub fn strip_untils_off_texpr(te: TypedExpr) -> TypedExpr {
     match te.clone() {
-        TypedExpr::TEConst(_, _) => te,
-        TypedExpr::TEVar(_, _) => te,
-        TypedExpr::TEBinop(b, op1, op2, t) => match b {
+        TypedExpr::Const(_, _) => te,
+        TypedExpr::Var(_, _) => te,
+        TypedExpr::Binop(b, op1, op2, t) => match b {
             Binop::SUntil | Binop::Until => strip_untils_off_texpr(*op1),
-            _ => TypedExpr::TEBinop(
+            _ => TypedExpr::Binop(
                 b,
                 Box::new(strip_untils_off_texpr(*op1)),
                 Box::new(strip_untils_off_texpr(*op2)),
                 t,
             ),
         },
-        TypedExpr::TEUnop(u, op1, t) => {
-            TypedExpr::TEUnop(u, Box::new(strip_untils_off_texpr(*op1)), t)
+        TypedExpr::Unop(u, op1, t) => {
+            TypedExpr::Unop(u, Box::new(strip_untils_off_texpr(*op1)), t)
         }
-        TypedExpr::TEInput(_) => te,
-        TypedExpr::TECall(_, _, _) => te,
-        TypedExpr::TEPred(_, _, _, _) => te,
+        TypedExpr::Input(_) => te,
+        TypedExpr::Call(_, _, _) => te,
+        TypedExpr::Pred(_, _, _, _) => te,
     }
 }
 
