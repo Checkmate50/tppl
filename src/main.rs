@@ -1,5 +1,3 @@
-use chumsky;
-use clap;
 use std::fs;
 
 // use crate::arithmetic::spam_sample;
@@ -30,7 +28,7 @@ struct Cli {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
    let cli = <Cli as clap::Parser>::parse();
    let f_name = cli.f_name;
-   let kde = cli.kde.unwrap_or_else(|| stats::Kernel::Gaussian);
+   let kde = cli.kde.unwrap_or(stats::Kernel::Gaussian);
 
 
     // let f_name = env::args().nth(1).expect("Expected file argument");
@@ -69,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn lex_and_parse(src: &str) -> Option<ast::Program> {
     use chumsky::{prelude::*, Stream};
     let (tokens, lex_errs) = lexer::lexer().parse_recovery(src);
-    if lex_errs.len() > 0 {
+    if !lex_errs.is_empty() {
         println!("lexer errors {:?}", lex_errs);
         None
     } else {
@@ -78,7 +76,7 @@ fn lex_and_parse(src: &str) -> Option<ast::Program> {
             let (prog, parse_errs) = parser::parser()
                 .parse_recovery(Stream::from_iter(len..len + 1, tokens.into_iter()));
 
-            if parse_errs.len() > 0 {
+            if !parse_errs.is_empty() {
                 println!("parser errors {:?}", parse_errs);
                 None
             } else {

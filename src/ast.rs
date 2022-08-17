@@ -19,7 +19,7 @@ pub enum Const {
 
 pub type Var = String;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Binop {
     Plus,
     Minus,
@@ -31,7 +31,7 @@ pub enum Binop {
     SUntil,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Unop {
     Neg,
     Not,

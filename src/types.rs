@@ -1,6 +1,6 @@
 use crate::errors;
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum SimpleType {
     Bool,
     Float,
@@ -13,10 +13,7 @@ pub enum SimpleType {
 
 impl SimpleType {
     pub const fn is_predicate(&self) -> bool {
-        match self {
-            SimpleType::Predicate(_, _) => true,
-            _ => false,
-        }
+        matches!(self, SimpleType::Predicate(_, _))
     }
 }
 
@@ -35,22 +32,23 @@ impl SimpleType {
 
     Global(Future(Until)) : future, always, true
 */
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TemporalAvailability {
     Current,
-    Next,
+    Next(TemporalPersistency),
     Future,
     Undefined,
 }
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TemporalPersistency {
-    Fleeting,
+    // Fleeting(n) where n is the number of timesteps until temporal_availability transformation? This would allow `x = e in the next two timesteps`
+    Fleeting, 
     Lingering,
     Always,
     Undefined,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct UntilDependencies {
     pub weak: Vec<usize>,
     pub strong: Vec<usize>,
@@ -62,14 +60,14 @@ impl UntilDependencies {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TemporalType {
     pub when_available: TemporalAvailability,
     pub when_dissipates: TemporalPersistency,
     pub is_until: Option<UntilDependencies>,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Type(pub TemporalType, pub SimpleType);
 
 impl Type {
@@ -86,7 +84,7 @@ impl Type {
 pub fn is_currently_available(ty: &TemporalType) -> bool {
     match ty.when_available {
         TemporalAvailability::Current | TemporalAvailability::Future => true,
-        TemporalAvailability::Next => false,
+        TemporalAvailability::Next(_) => false,
         TemporalAvailability::Undefined => panic!("The immediacy of `undefined` is meaningless."),
     }
 }
@@ -96,24 +94,14 @@ pub fn advance_type(temp: TemporalType) -> Option<TemporalType> {
         TemporalPersistency::Fleeting => {
             match temp.when_available {
                 TemporalAvailability::Current => None,
-                TemporalAvailability::Next => {
-                    if temp.is_until.is_some() {
-                        Some(
-                            TemporalType {
-                                when_available : TemporalAvailability::Current,
-                                when_dissipates : TemporalPersistency::Lingering,
-                                is_until : temp.is_until
-                            }
-                        )
-                    } else {
-                        Some(
-                            TemporalType {
-                                when_available : TemporalAvailability::Current,
-                                when_dissipates : TemporalPersistency::Fleeting,
-                                is_until : None
-                            }
-                        )
-                    }
+                TemporalAvailability::Next(temp_pers) => {
+                    Some(
+                        TemporalType {
+                            when_available : TemporalAvailability::Current,
+                            when_dissipates : temp_pers,
+                            is_until : temp.is_until
+                        }
+                    )
                 },
                 TemporalAvailability::Future => panic!("While `future` should be advanced to `future` (since finally), but it should be impossible for there to be a non-always future. `Future` should only occur with `Global(Future[Until])`."),
                 TemporalAvailability::Undefined => panic!("The immediacy of `undefined` is meaningless.")
@@ -142,7 +130,6 @@ pub fn resolve_temporal_conflicts(
                 if !forgive_until || temp.is_until.is_none() {
                     Err(errors::TemporalConflictError {
                         message: format!("Conflicting types {:?} and {:?}", temp, candidate)
-                            .to_string(),
                     })
                 } else {
                     // I think it's fine to discard `temp` when it softly-clashes with `candidate` if the code reaches here.
@@ -157,7 +144,7 @@ pub fn resolve_temporal_conflicts(
 
     let mut resolved: Vec<TemporalType> = resolved?
         .into_iter()
-        .filter_map(std::convert::identity)
+        .flatten()
         .collect();
     resolved.append(&mut vec![candidate]);
     Ok(resolved)
@@ -186,7 +173,7 @@ pub fn resolve_simple_conflicts(
         }
         (a, b) if a == b => Ok(a),
         _ => Err(errors::SimpleConflictError {
-            message: format!("Types {:?}\nand {:?}\ncannot be resolved.", a, b).to_string(),
+            message: format!("Types {:?}\nand {:?}\ncannot be resolved.", a, b),
         })?,
     }
 }

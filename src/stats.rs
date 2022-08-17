@@ -1,4 +1,3 @@
-use clap;
 // https://jduncstats.com/posts/2019-03-16-kde-scratch/
 
 /*
@@ -63,7 +62,7 @@ pub fn kernel_density_estimation(x: f64, bandwith: f64, observations: Vec<f64>, 
 
 pub fn range(start: f64, end: f64, length: i32) -> Vec<f64> {
     let step: f64 = (end - start) / (length as f64);
-    let mut iter = (0..length).into_iter();
+    let mut iter = 0..length;
 
     std::iter::successors(Some(start), |n| iter.next().map(|_| n + step)).collect::<Vec<f64>>()
 }

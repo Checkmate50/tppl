@@ -1,7 +1,17 @@
 [package]
 name = "tppl"
-version = "0.1.0"
 edition = "2021"
+version = "0.1.0"
+authors = ["Dietrich Geisler <email>", "Peter Chon <email>"]
+description = ""
+documentation = ""
+homepage = ""
+repository = "https://github.com/Checkmate50/tppl"
+readme = "README.md"
+keywords = []
+categories = []
+license = "MIT"
+
 
 [dependencies]
 chumsky = "0.8.0"

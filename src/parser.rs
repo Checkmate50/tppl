@@ -127,7 +127,7 @@ fn assignment_parser(
     use ast::Command;
     use lexer::Token;
 
-    let ident = select! { Token::Var(ident) => ident.clone() };
+    let ident = select! { Token::Var(ident) => ident };
 
     let prop_target = ident.then(
         ident
@@ -142,7 +142,7 @@ fn assignment_parser(
         Token::FUTURE => Command::Finally as fn(String, ast::Expr) -> ast::Command
     };
 
-    let assignment = choice((
+    choice((
         ident
             .then(assign_wrapper)
             .then(expr_parser())
@@ -153,9 +153,7 @@ fn assignment_parser(
                 wrapper(p_name, expr)
             },
         ),
-    ));
-
-    assignment
+    ))
 }
 
 fn command_parser() -> impl Parser<lexer::Token, ast::Command, Error = Simple<lexer::Token>> + Clone
@@ -180,13 +178,11 @@ fn command_parser() -> impl Parser<lexer::Token, ast::Command, Error = Simple<le
             .ignore_then(expr_parser())
             .map(Command::Dist);
 
-        let statement = timestep
+        timestep
             .or(assertion)
             .or(assignment_parser())
             .or(print)
-            .or(dist);
-
-        statement
+            .or(dist)
     })
 }
 

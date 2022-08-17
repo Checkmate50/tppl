@@ -1,0 +1,6 @@
+y <.. false
+x <X 3 <!> y
+---
+print x
+---
+print x // should error

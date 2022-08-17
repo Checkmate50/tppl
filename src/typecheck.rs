@@ -29,18 +29,16 @@ impl TypeContext {
                     "Name {} is taken by a builtin predicate. No need to internally look it up.",
                     var_name
                 )
-                .to_string(),
             })?
         }
 
         if let Some((temps, simpl)) = self.vars.get(var_name) {
-            if filter_out_nexts(temps).len() == 0 {
+            if filter_out_nexts(temps).is_empty() {
                 Err(errors::NameError {
                     message: format!(
                         "Name {} doesn't have any temporal types that are currently available.",
                         var_name
                     )
-                    .to_string(),
                 })?
             }
 
@@ -59,7 +57,6 @@ impl TypeContext {
                             "Name only has {:?}, which isn't immediately available.",
                             temps
                         )
-                        .to_string(),
                     })?
                 }
             } else {
@@ -71,7 +68,6 @@ impl TypeContext {
                             "Name only has {:?}, which isn't immediately available.",
                             temps
                         )
-                        .to_string(),
                     })?
                 }
             }
@@ -94,7 +90,6 @@ impl TypeContext {
                     "Name {} can't be assigned to since it's the name of a built-in predicate.",
                     var_name
                 )
-                .to_string(),
             })?
         }
 
@@ -164,29 +159,30 @@ fn get_id() -> usize {
 fn get_most_immediate_type(temps: &Vec<types::TemporalType>) -> Option<types::TemporalType> {
     use types::TemporalAvailability;
     let most_immediate = temps
-        .into_iter()
+        .iter()
         .max_by_key(|temp| match temp.when_available {
             TemporalAvailability::Current => 1,
-            TemporalAvailability::Next => -1,
+            TemporalAvailability::Next(_) => -1,
             TemporalAvailability::Future => 0,
             TemporalAvailability::Undefined => {
                 panic!("The immediacy of `undefined` is meaningless.")
             }
         })?;
 
-    if most_immediate.when_available == TemporalAvailability::Next {
-        return None;
-    } else {
-        Some(most_immediate.to_owned())
+    match most_immediate.when_available {
+        TemporalAvailability::Next(_) => None,
+        _ => Some(most_immediate.to_owned())
     }
 }
 
 fn filter_out_nexts(temps: &Vec<types::TemporalType>) -> Vec<types::TemporalType> {
     let only_currents: Vec<types::TemporalType> = temps
-        .into_iter()
-        .filter(|temp| temp.when_available != types::TemporalAvailability::Next)
-        .map(|temp| temp.to_owned())
-        .collect();
+        .iter()
+        .filter_map(|temp| match temp.when_available {
+                types::TemporalAvailability::Next(_) => None,
+                _ => Some(temp.to_owned())
+            }
+        ).collect();
     only_currents
 }
 
@@ -194,12 +190,12 @@ fn sort_types_by_immediacy(temps: &Vec<types::TemporalType>) -> Option<Vec<types
     use types::TemporalAvailability;
     let mut only_currents = filter_out_nexts(temps);
 
-    if only_currents.len() == 0 {
-        return None;
+    if only_currents.is_empty() {
+        None
     } else {
         only_currents.sort_by_key(|temp| match temp.when_available {
             TemporalAvailability::Current => 1,
-            TemporalAvailability::Next => -1,
+            TemporalAvailability::Next(_) => -1,
             TemporalAvailability::Future => 0,
             TemporalAvailability::Undefined => {
                 panic!("The immediacy of `undefined` is meaningless.")
@@ -284,7 +280,7 @@ fn infer_expr(
                 }
                 Binop::Or => {
                     // todo: negation as failure?
-                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
+                    let ty1 = Type(temporal_undefined, SimpleType::Bool);
                     let op1 = ast::new_texpr(
                         operand1,
                         ty1,
@@ -300,7 +296,7 @@ fn infer_expr(
                 }
                 Binop::And => {
                     // todo: negation as failure?
-                    let ty1 = Type(temporal_undefined.clone(), SimpleType::Bool);
+                    let ty1 = Type(temporal_undefined, SimpleType::Bool);
                     let op1 = ast::new_texpr(
                         operand1,
                         ty1,
@@ -435,10 +431,7 @@ fn infer_expr(
                 .collect::<Result<Vec<TypedExpr>, CompileTimeError>>()?;
 
             let is_dist_splatted: bool = typed_args.clone().into_iter().any(|typed_arg| {
-                match ast::type_of_typedexpr(typed_arg).get_simpl() {
-                    types::SimpleType::Pdf => true,
-                    _ => false,
-                }
+                matches!(ast::type_of_typedexpr(typed_arg).get_simpl(), types::SimpleType::Pdf)
             });
 
             if is_dist_splatted {
@@ -539,12 +532,12 @@ fn infer_expr(
                 )?;
                 // `f(x) = 2`'s return type is just gonna be `Option<Int>`.
                 // May later change inference_algo to detect if `&` is used to decide whether or not type is Optional.
-                let simpl_return_type = type_of_typedexpr(typed_body.clone()).get_simpl();
+                let simpl_return_type = type_of_typedexpr(typed_body).get_simpl();
 
                 local_context.add_name(
                     &name,
                     Type(
-                        temporal_ty_param.clone(),
+                        temporal_ty_param,
                         SimpleType::Predicate(arg_types.clone(), Box::new(simpl_return_type)),
                     ),
                 )?;
@@ -603,25 +596,15 @@ fn infer_command(
         }
         Command::Global(v, e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
-            let t = if blank_until_dependencies.is_empty() {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Current,
-                        when_dissipates: types::TemporalPersistency::Always,
-                        is_until: None,
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            } else {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Current,
-                        when_dissipates: types::TemporalPersistency::Always,
-                        is_until: Some(blank_until_dependencies),
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            };
+            let until_dependencies = (!blank_until_dependencies.is_empty()).then_some(blank_until_dependencies);
+            let t = Type(
+                TemporalType {
+                    when_available: types::TemporalAvailability::Current,
+                    when_dissipates: types::TemporalPersistency::Always,
+                    is_until: until_dependencies,
+                },
+                ast::type_of_typedexpr(te.clone()).get_simpl(),
+            );
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             if !is_assert {
                 ctx.add_name(&v, t)?;
@@ -630,25 +613,15 @@ fn infer_command(
         }
         Command::Next(v, e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
-            let t = if blank_until_dependencies.is_empty() {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Next,
-                        when_dissipates: types::TemporalPersistency::Fleeting,
-                        is_until: None,
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            } else {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Next,
-                        when_dissipates: types::TemporalPersistency::Fleeting,
-                        is_until: Some(blank_until_dependencies),
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            };
+            let until_dependencies = (!blank_until_dependencies.is_empty()).then_some(blank_until_dependencies);
+            let t = Type(
+                TemporalType {
+                    when_available: types::TemporalAvailability::Next(types::TemporalPersistency::Fleeting),
+                    when_dissipates: types::TemporalPersistency::Fleeting,
+                    is_until: until_dependencies,
+                },
+                ast::type_of_typedexpr(te.clone()).get_simpl(),
+            );
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             if !is_assert {
                 ctx.add_name(&v, t)?;
@@ -657,25 +630,15 @@ fn infer_command(
         }
         Command::Update(v, e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
-            let t = if blank_until_dependencies.is_empty() {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Next,
-                        when_dissipates: types::TemporalPersistency::Fleeting,
-                        is_until: Some(blank_until_dependencies),
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            } else {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Next,
-                        when_dissipates: types::TemporalPersistency::Fleeting,
-                        is_until: Some(blank_until_dependencies),
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            };
+            let until_dependencies = (!blank_until_dependencies.is_empty()).then_some(blank_until_dependencies);
+            let t = Type(
+                TemporalType {
+                    when_available: types::TemporalAvailability::Next(types::TemporalPersistency::Lingering),
+                    when_dissipates: types::TemporalPersistency::Fleeting,
+                    is_until: until_dependencies,
+                },
+                ast::type_of_typedexpr(te.clone()).get_simpl(),
+            );
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             if !is_assert {
                 ctx.add_name(&v, t)?;
@@ -684,25 +647,15 @@ fn infer_command(
         }
         Command::Finally(v, e) => {
             let te = infer_expr(e, ctx, &mut blank_until_dependencies, udep_map)?;
-            let t = if blank_until_dependencies.is_empty() {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Future,
-                        when_dissipates: types::TemporalPersistency::Always,
-                        is_until: None,
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            } else {
-                Type(
-                    TemporalType {
-                        when_available: types::TemporalAvailability::Future,
-                        when_dissipates: types::TemporalPersistency::Always,
-                        is_until: Some(blank_until_dependencies),
-                    },
-                    ast::type_of_typedexpr(te.clone()).get_simpl(),
-                )
-            };
+            let until_dependencies = (!blank_until_dependencies.is_empty()).then_some(blank_until_dependencies);
+            let t = Type(
+                TemporalType {
+                    when_available: types::TemporalAvailability::Future,
+                    when_dissipates: types::TemporalPersistency::Always,
+                    is_until: until_dependencies,
+                },
+                ast::type_of_typedexpr(te.clone()).get_simpl(),
+            );
             let te = ast::new_texpr(te, t.clone(), "Idk how Command-lvl type inference failed. This is only used to make until-dependency analysis convenient later down the pipe.".to_string())?;
             if !is_assert {
                 ctx.add_name(&v, t)?;
@@ -880,12 +833,11 @@ fn free_vars_of_expr(e: ast::Expr) -> ast::FreeVars {
         Expr::Input => ast::FreeVars::new(),
         Expr::Call(name, args) => {
             let name = HashSet::from([name]);
-            let free_vars = args.into_iter().fold(name, |vars, x| {
+            args.into_iter().fold(name, |vars, x| {
                 vars.union(&free_vars_of_expr(x))
                     .map(|v| v.to_owned())
                     .collect::<HashSet<Var>>()
-            });
-            free_vars
+            })
         }
         Expr::Pred(name, args, body) => {
             let body_free_vars = free_vars_of_expr(*body);
@@ -904,7 +856,7 @@ fn free_vars_of_command(cmd: &ast::Command) -> ast::FreeVars {
     match cmd.clone() {
         Command::Timestep => panic!("Huh, timesteps should've been taken out with `split`... Why was `infer_command` called on one?"),
         Command::Global(_v, e) | Command::Next(_v, e) | Command::Update(_v, e) | Command::Finally(_v, e) => {
-            free_vars_of_expr(e.clone())
+            free_vars_of_expr(e)
         },
         Command::Print(e) | Command::Dist(e) => free_vars_of_expr(e),
         Command::Assert(c) => free_vars_of_command(&*c)
@@ -933,10 +885,10 @@ fn arrange_by_dependencies(
         .iter()
         .map(|cmd| (defined_var_of_command(cmd), cmd.clone()));
     let defined_vars: ast::DefVars = HashSet::from_iter(a.clone().filter_map(|(opt, _)| opt));
-    let delayed_commands: Vec<ast::Command> = a
+    let mut delayed_commands: Vec<ast::Command> = a
         .filter_map(
             |(opt, cmd)| {
-                if let Some(_) = opt {
+                if opt.is_some() {
                     None
                 } else {
                     Some(cmd)
@@ -998,14 +950,13 @@ fn arrange_by_dependencies(
 
     match toposort(&graph, None) {
         Ok(order) => {
-            let top_order: Vec<&Var> = order
+            let top_order = order
                 .into_iter()
                 .map(|node| {
                     graph
                         .node_weight(node)
                         .expect("All the nodes should have weight.")
-                })
-                .collect();
+                });
 
             let mut cmd_by_var: HashMap<Var, Vec<ast::Command>> = HashMap::new();
             for cmd in block.into_iter() {
@@ -1025,7 +976,7 @@ fn arrange_by_dependencies(
                         .clone(),
                 );
             }
-            cmd_order.append(&mut delayed_commands.clone());
+            cmd_order.append(&mut delayed_commands);
             Ok(cmd_order)
         }
         Err(err) => Err(errors::CircularAssignError {
@@ -1035,7 +986,6 @@ fn arrange_by_dependencies(
                     .node_weight(err.node_id())
                     .expect("All the nodes should have weight.")
             )
-            .to_string(),
         }),
     }
 }
@@ -1061,7 +1011,7 @@ pub fn infer_program(program: ast::Program) -> Result<ast::TypedProgram, errors:
 
     let arranged_program: Vec<Result<Vec<ast::Command>, errors::CircularAssignError>> = time_blocks
         .into_iter()
-        .map(|tb| arrange_by_dependencies(tb))
+        .map(arrange_by_dependencies)
         .collect();
     let arranged_program: Result<Vec<Vec<ast::Command>>, errors::CircularAssignError> =
         arranged_program.into_iter().collect();

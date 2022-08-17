@@ -267,8 +267,8 @@ impl VarContext {
                     .map(|(temp, texpr, was_satisfied)| {
                     if let Some(until_conds) = temp.clone().is_until {
                         // shouldn't get any `None`s since those are only returned from `eval_expr(..., is_pred=true)`
-                        let strong: Vec<TypedExpr> = until_conds.strong.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
-                        let weak: Vec<TypedExpr> = until_conds.weak.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).unwrap().to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
+                        let strong: Vec<TypedExpr> = until_conds.strong.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).expect("udep_map's garbage collection deleted a referenced until_cond_expr.").to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
+                        let weak: Vec<TypedExpr> = until_conds.weak.iter().map(|cond_id| eval_expr(self.udep_map.get(cond_id).expect("udep_map's garbage collection deleted a referenced until_cond_expr").to_owned(), self, false)).collect::<Result<Vec<Option<TypedExpr>>, errors::ExecutionTimeError>>()?.into_iter().map(Option::unwrap).collect();
                         if strong.clone().into_iter().chain(weak.into_iter()).any(boolify) {
                             // an until_dependency was truthy
                             if strong.into_iter().all(boolify) {
@@ -606,34 +606,35 @@ fn boolify(texpr: TypedExpr) -> bool {
 }
 
 fn get_most_immediate_texpr(
-    values: &Vec<(TemporalType, TypedExpr)>,
+    values: &[(TemporalType, TypedExpr)],
 ) -> Option<(TemporalType, TypedExpr)> {
     use types::TemporalAvailability;
     let most_immediate = values
         .iter()
         .max_by_key(|(temp, _)| match temp.when_available {
             TemporalAvailability::Current => 1,
-            TemporalAvailability::Next => -1,
+            TemporalAvailability::Next(_) => -1,
             TemporalAvailability::Future => 0,
             TemporalAvailability::Undefined => {
                 panic!("The immediacy of `undefined` is meaningless.")
             }
         })?;
-
-    if most_immediate.0.when_available == TemporalAvailability::Next {
-        None
-    } else {
-        Some(most_immediate.to_owned())
+    
+    match most_immediate.0.when_available {
+        TemporalAvailability::Next(_) => None,
+        _ => Some(most_immediate.to_owned())
     }
 }
 
 fn filter_out_nexts(
-    temp_texpr_pairs: &Vec<(TemporalType, TypedExpr)>,
+    temp_texpr_pairs: &[(TemporalType, TypedExpr)],
 ) -> Vec<(TemporalType, TypedExpr)> {
     let only_currents: Vec<(TemporalType, TypedExpr)> = temp_texpr_pairs
         .iter()
-        .filter(|(temp, _)| temp.when_available != types::TemporalAvailability::Next)
-        .map(|tup| tup.to_owned())
+        .filter_map(|(temp, texpr)| match temp.when_available {
+            types::TemporalAvailability::Next(_) => None,
+            _ => Some((temp.to_owned(), texpr.to_owned()))
+        })
         .collect();
 
     only_currents
@@ -651,7 +652,7 @@ fn sort_texprs_by_immediacy(
     } else {
         only_currents.sort_by_key(|(temp, _)| match temp.when_available {
             TemporalAvailability::Current => 1,
-            TemporalAvailability::Next => -1,
+            TemporalAvailability::Next(_) => -1,
             TemporalAvailability::Future => 0,
             TemporalAvailability::Undefined => {
                 panic!("The immediacy of `undefined` is meaningless.")
@@ -956,12 +957,9 @@ fn eval_expr(
                 .collect();
 
             if let Some(args) = args {
-                let is_dist_splatted: bool = args.clone().into_iter().any(|arg| {
-                    match ast::type_of_typedexpr(arg).get_simpl() {
-                        types::SimpleType::Pdf => true,
-                        _ => false,
-                    }
-                });
+                let is_dist_splatted: bool = args.clone().into_iter().any(|arg| 
+                    matches!(ast::type_of_typedexpr(arg).get_simpl(), types::SimpleType::Pdf)
+                );
 
                 let return_val: Result<TypedExpr, errors::ExecutionTimeError> = if is_dist_splatted
                 {
